@@ -211,7 +211,9 @@ export default function App() {
           onClick={handleGroundClick}
           onDoubleClick={handleGroundDoubleClick}
         />
-        <Grass />
+        <Suspense fallback={null}>
+          <Grass />
+        </Suspense>
         <Pond />
         <PondStream />
         <FloatingParticles />
