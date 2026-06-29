@@ -148,8 +148,8 @@ export const ANIMALS = {
     collisionRadius: 0.35,
     walkSpeed: 2.0,
     runSpeed: 5.5,
-    walkTimescale: 1.0,
-    runTimescale: 2.2,
+    walkTimescale: 1.75,
+    runTimescale: 3.8,
     anims: {
       idle: 'Idle',
       walk: 'WalkSlow_F',  // Rabbit has WalkSlow
