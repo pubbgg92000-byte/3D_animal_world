@@ -1,21 +1,22 @@
 import { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import {
+  WORLD_SIZE,
+  getTerrainHeight,
+  isWaterAt,
+} from '../utils/world';
 
 /* ========================================
    Constants
    ======================================== */
 
 /** Ground dimensions */
-const GROUND_SIZE = 80;
-const GROUND_SEGMENTS = 64;
-
-/** Terrain noise parameters */
-const HILL_AMPLITUDE = 1.2;
-const HILL_FREQUENCY = 0.04;
+const GROUND_SIZE = WORLD_SIZE;
+const GROUND_SEGMENTS = 96;
 
 /** Grass blade counts & dimensions */
-const GRASS_COUNT = 12000;
+const GRASS_COUNT = 14000;
 const GRASS_HEIGHT_MIN = 0.15;
 const GRASS_HEIGHT_MAX = 0.45;
 
@@ -27,16 +28,10 @@ const ROCK_COUNT = 60;
    Helpers
    ======================================== */
 
-/** Simple 2D value noise for terrain height */
-function terrainHeight(x, z) {
-  const h1 = Math.sin(x * HILL_FREQUENCY) * Math.cos(z * HILL_FREQUENCY * 1.3);
-  const h2 = Math.sin(x * HILL_FREQUENCY * 2.1 + 1.7) * Math.cos(z * HILL_FREQUENCY * 1.7 + 0.5);
-  return (h1 * 0.6 + h2 * 0.4) * HILL_AMPLITUDE;
-}
-
 /** Seeded-ish pseudo-random using sin */
 function seededRandom(seed) {
-  return (Math.sin(seed * 12.9898 + 78.233) * 43758.5453) % 1;
+  const value = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+  return value - Math.floor(value);
 }
 
 /* ========================================
@@ -54,6 +49,8 @@ function seededRandom(seed) {
 export default function Ground({ onClick, onDoubleClick }) {
   const meshRef = useRef();
   const grassRef = useRef();
+  const grassDummy = useRef(new THREE.Object3D());
+  const lastGrassUpdate = useRef(0);
 
   // ---------- Terrain geometry — depressed in pond area ----------
 
@@ -66,42 +63,11 @@ export default function Ground({ onClick, onDoubleClick }) {
     );
     geo.rotateX(-Math.PI / 2);
 
-    // Only the main pond depression — extra pools removed
-    const DEPRESSIONS = [
-      { x: 0,  z: 5,  r: 5.5, depth: 1.6 }, // main pond
-    ];
-
-    // Stream channel — shallow trough from pond south edge to world boundary
-    // We'll handle it as a series of overlapping circular depressions
-    const streamStartZ = 10.5;
-    const streamEndZ   = 38.5;
-    const streamSegs   = 22;
-    for (let i = 0; i <= streamSegs; i++) {
-      const t  = i / streamSegs;
-      const sz = streamStartZ + t * (streamEndZ - streamStartZ);
-      const sx = Math.sin(t * Math.PI * 2.5) * 0.3; // gentle meander
-      const r  = 1.6 - t * 0.5;  // taper width
-      DEPRESSIONS.push({ x: sx, z: sz, r, depth: 0.18 });
-    }
-
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
       const z = pos.getZ(i);
-      let y = terrainHeight(x, z);
-
-      for (const dep of DEPRESSIONS) {
-        const dx = x - dep.x;
-        const dz = z - dep.z;
-        const dist = Math.sqrt(dx * dx + dz * dz);
-        if (dist < dep.r) {
-          const t = dist / dep.r;
-          const blend = t * t * (3 - 2 * t); // smoothstep
-          y = y * blend + (-dep.depth) * (1 - blend);
-        }
-      }
-
-      pos.setY(i, y);
+      pos.setY(i, getTerrainHeight(x, z));
     }
     pos.needsUpdate = true;
     geo.computeVertexNormals();
@@ -118,26 +84,9 @@ export default function Ground({ onClick, onDoubleClick }) {
       const x = (seededRandom(i * 3 + 0.1) * 2 - 1) * halfSize;
       const z = (seededRandom(i * 3 + 0.2) * 2 - 1) * halfSize;
 
-      // Skip grass inside pond or stream areas
-      const GRASS_EXCLUSIONS = [
-        { x: 0,  z: 5,  r: 6.5 }, // main pond
-      ];
-      // Also exclude along the stream corridor
-      const streamT = Math.max(0, Math.min(1, (z - 10.5) / 28));
-      const streamX = Math.sin(streamT * Math.PI * 2.5) * 0.3;
-      const streamDist = Math.sqrt((x - streamX) ** 2);
-      const streamW = 2.0 - streamT * 0.5;
-      if (z >= 10.5 && z <= 38.5 && streamDist < streamW) {
-        continue;
-      }
-      let inWater = false;
-      for (const ex of GRASS_EXCLUSIONS) {
-        const dx = x - ex.x, dz = z - ex.z;
-        if (dx * dx + dz * dz < ex.r * ex.r) { inWater = true; break; }
-      }
-      if (inWater) continue;
+      if (isWaterAt(x, z, 1.2)) continue;
 
-      const y = terrainHeight(x, z);
+      const y = getTerrainHeight(x, z);
       positions.push(x, y, z);
 
       const h = GRASS_HEIGHT_MIN + seededRandom(i * 7 + 0.3) * (GRASS_HEIGHT_MAX - GRASS_HEIGHT_MIN);
@@ -157,7 +106,9 @@ export default function Ground({ onClick, onDoubleClick }) {
   useFrame(({ clock }) => {
     if (!grassRef.current) return;
     const time = clock.getElapsedTime();
-    const dummy = new THREE.Object3D();
+    if (time - lastGrassUpdate.current < 1 / 20) return;
+    lastGrassUpdate.current = time;
+    const dummy = grassDummy.current;
 
     for (let i = 0; i < grassCount; i++) {
       const x = grassPositions[i * 3];
@@ -186,7 +137,8 @@ export default function Ground({ onClick, onDoubleClick }) {
     for (let i = 0; i < FLOWER_COUNT; i++) {
       const x = (seededRandom(i * 5 + 100) * 2 - 1) * halfSize;
       const z = (seededRandom(i * 5 + 101) * 2 - 1) * halfSize;
-      const y = terrainHeight(x, z);
+      if (isWaterAt(x, z, 0.8)) continue;
+      const y = getTerrainHeight(x, z);
       const color = colors[Math.floor(seededRandom(i * 13 + 200) * colors.length)];
       const scale = 0.04 + seededRandom(i * 17 + 300) * 0.06;
       data.push({ x, y, z, color, scale });
@@ -203,7 +155,8 @@ export default function Ground({ onClick, onDoubleClick }) {
     for (let i = 0; i < ROCK_COUNT; i++) {
       const x = (seededRandom(i * 7 + 500) * 2 - 1) * halfSize;
       const z = (seededRandom(i * 7 + 501) * 2 - 1) * halfSize;
-      const y = terrainHeight(x, z);
+      if (isWaterAt(x, z, 0.8)) continue;
+      const y = getTerrainHeight(x, z);
       const scale = 0.1 + seededRandom(i * 19 + 600) * 0.25;
       const rotY = seededRandom(i * 23 + 700) * Math.PI * 2;
       data.push({ x, y, z, scale, rotY });

@@ -1,3 +1,6 @@
+import { WORLD_HALF, getTerrainHeight, isWaterAt } from '../utils/world';
+import { createRandom, WORLD_SEED } from '../components/environment/worldGenerator';
+
 /**
  * Central configuration for all animals in the ecosystem.
  *
@@ -20,6 +23,7 @@ export const ANIMALS = {
     model: '/models/moose.glb',
     diet: DIET.HERBIVORE,
     scale: 1.0,
+    collisionRadius: 0.9,
     walkSpeed: 2.5,
     runSpeed: 5.0,
     walkTimescale: 1.0,
@@ -45,7 +49,7 @@ export const ANIMALS = {
     // Spawn position
     spawnPos: [-8, 0, 0],
     // Stats decay rates (per second)
-    decayRates: { energy: 0.008, hydration: 0.012, hunger: 0.010 },
+    decayRates: { energy: 0.0025, hydration: 0.0035, hunger: 0.0030 },
   },
 
   deer: {
@@ -54,6 +58,7 @@ export const ANIMALS = {
     model: '/models/deer.glb',
     diet: DIET.HERBIVORE,
     scale: 1.0,
+    collisionRadius: 0.75,
     walkSpeed: 3.0,
     runSpeed: 8.5,           // deer are fast
     walkTimescale: 1.1,
@@ -73,7 +78,7 @@ export const ANIMALS = {
     },
     furTint: '#c4975a',
     spawnPos: [14, 0, -8],
-    decayRates: { energy: 0.009, hydration: 0.013, hunger: 0.011 },
+    decayRates: { energy: 0.0028, hydration: 0.0038, hunger: 0.0032 },
   },
 
   bear: {
@@ -82,6 +87,7 @@ export const ANIMALS = {
     model: '/models/bear.glb',
     diet: DIET.CARNIVORE,
     scale: 1.0,
+    collisionRadius: 1.0,
     walkSpeed: 2.0,
     runSpeed: 4.5,
     walkTimescale: 1.0,
@@ -101,7 +107,7 @@ export const ANIMALS = {
     },
     furTint: '#4a3520',
     spawnPos: [-18, 0, 15],
-    decayRates: { energy: 0.007, hydration: 0.010, hunger: 0.014 },
+    decayRates: { energy: 0.0022, hydration: 0.0030, hunger: 0.0038 },
   },
 
   fox: {
@@ -110,6 +116,7 @@ export const ANIMALS = {
     model: '/models/fox.glb',
     diet: DIET.CARNIVORE,
     scale: 1.0,
+    collisionRadius: 0.55,
     walkSpeed: 3.5,
     runSpeed: 7.0,
     walkTimescale: 1.0,
@@ -129,7 +136,7 @@ export const ANIMALS = {
     },
     furTint: '#c4652a',
     spawnPos: [20, 0, 18],
-    decayRates: { energy: 0.010, hydration: 0.011, hunger: 0.015 },
+    decayRates: { energy: 0.0032, hydration: 0.0034, hunger: 0.0040 },
   },
 
   rabbit: {
@@ -138,6 +145,7 @@ export const ANIMALS = {
     model: '/models/rabbit.glb',
     diet: DIET.HERBIVORE,
     scale: 1.0,
+    collisionRadius: 0.35,
     walkSpeed: 2.0,
     runSpeed: 5.5,
     walkTimescale: 1.0,
@@ -157,12 +165,64 @@ export const ANIMALS = {
     },
     furTint: '#a89070',
     spawnPos: [-10, 0, -15],
-    decayRates: { energy: 0.012, hydration: 0.014, hunger: 0.013 },
+    decayRates: { energy: 0.0035, hydration: 0.0040, hunger: 0.0036 },
   },
 };
 
 /** Array form — only active animals */
-export const ANIMAL_LIST = [ANIMALS.moose, ANIMALS.deer];
+function createInstance(base, id, name, spawnPos) {
+  return {
+    ...base,
+    id,
+    name,
+    species: base.id,
+    spawnPos,
+  };
+}
+
+const spawnRandom = createRandom(`${WORLD_SEED}:animated-animals`);
+const occupiedSpawns = [];
+
+function randomSpawn(zone = 'all') {
+  for (let attempt = 0; attempt < 80; attempt++) {
+    let x;
+    let z;
+    if (zone === 'meadow') {
+      const angle = spawnRandom() * Math.PI * 2;
+      const radius = 7 + Math.sqrt(spawnRandom()) * 18;
+      x = Math.cos(angle) * radius;
+      z = Math.sin(angle) * radius;
+    } else if (zone === 'edge') {
+      const angle = spawnRandom() * Math.PI * 2;
+      const radius = 27 + spawnRandom() * 16;
+      x = Math.cos(angle) * radius;
+      z = Math.sin(angle) * radius;
+    } else {
+      x = (spawnRandom() * 2 - 1) * (WORLD_HALF - 6);
+      z = (spawnRandom() * 2 - 1) * (WORLD_HALF - 6);
+    }
+    if (isWaterAt(x, z, 2.2)) continue;
+    if (occupiedSpawns.some(([px, , pz]) => Math.hypot(px - x, pz - z) < 3.2)) continue;
+    occupiedSpawns.push([x, getTerrainHeight(x, z), z]);
+    return [x, getTerrainHeight(x, z), z];
+  }
+  return [0, getTerrainHeight(0, -18), -18];
+}
+
+/** Animated wildlife models. Each animal has its own movement and AI state. */
+export const ANIMAL_LIST = [
+  createInstance(ANIMALS.moose, 'moose', 'Moose', randomSpawn('meadow')),
+  createInstance(ANIMALS.deer, 'deer', 'Deer', randomSpawn('meadow')),
+  createInstance(ANIMALS.deer, 'deer-2', 'Deer 2', randomSpawn('meadow')),
+  createInstance(ANIMALS.deer, 'deer-3', 'Deer 3', randomSpawn('meadow')),
+  createInstance(ANIMALS.deer, 'deer-4', 'Deer 4', randomSpawn('meadow')),
+  createInstance(ANIMALS.bear, 'bear', 'Bear', randomSpawn('edge')),
+  createInstance(ANIMALS.fox, 'fox', 'Fox', randomSpawn('edge')),
+  createInstance(ANIMALS.rabbit, 'rabbit', 'Rabbit', randomSpawn()),
+  createInstance(ANIMALS.rabbit, 'rabbit-2', 'Rabbit 2', randomSpawn()),
+  createInstance(ANIMALS.rabbit, 'rabbit-3', 'Rabbit 3', randomSpawn()),
+  createInstance(ANIMALS.rabbit, 'rabbit-4', 'Rabbit 4', randomSpawn()),
+];
 
 /** Get config by ID */
 export function getAnimalConfig(id) {

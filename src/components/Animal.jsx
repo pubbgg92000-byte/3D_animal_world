@@ -7,20 +7,7 @@ import useAnimalMovement from '../hooks/useAnimalMovement';
 import useAnimalAI from '../hooks/useAnimalAI';
 import useAnimalStats from '../hooks/useAnimalStats';
 import { registerAnimal, unregisterAnimal, resolveCollisions } from '../utils/collisionRegistry';
-
-/* ========================================
-   Terrain height — must match Ground.jsx
-   ======================================== */
-const HILL_AMPLITUDE = 1.2;
-const HILL_FREQUENCY = 0.04;
-
-function getTerrainHeight(x, z) {
-  const h1 = Math.sin(x * HILL_FREQUENCY) * Math.cos(z * HILL_FREQUENCY * 1.3);
-  const h2 =
-    Math.sin(x * HILL_FREQUENCY * 2.1 + 1.7) *
-    Math.cos(z * HILL_FREQUENCY * 1.7 + 0.5);
-  return (h1 * 0.6 + h2 * 0.4) * HILL_AMPLITUDE;
-}
+import { WORLD_HALF, getTerrainHeight, isPondAt } from '../utils/world';
 
 /* ========================================
    Constants
@@ -28,7 +15,48 @@ function getTerrainHeight(x, z) {
 const GRAZE_NECK_ANGLE = 1.4;
 const GRAZE_JAW_ANGLE = 0.2;
 const DRINK_NECK_ANGLE = 1.6;
-const SLEEP_BODY_LOWER = 0.5;
+const SLEEP_BODY_LOWER = 0.32;
+const FUR_TEXTURES = new Map();
+
+function getFurDetailTexture(species) {
+  if (FUR_TEXTURES.has(species)) return FUR_TEXTURES.get(species);
+  if (typeof document === 'undefined') return null;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const context = canvas.getContext('2d');
+  context.fillStyle = '#a8a8a8';
+  context.fillRect(0, 0, 128, 128);
+
+  let seed = [...species].reduce((sum, char) => sum + char.charCodeAt(0), 17);
+  const random = () => {
+    seed = (seed * 9301 + 49297) % 233280;
+    return seed / 233280;
+  };
+
+  for (let i = 0; i < 950; i++) {
+    const shade = 80 + Math.floor(random() * 150);
+    context.strokeStyle = `rgb(${shade}, ${shade}, ${shade})`;
+    context.globalAlpha = 0.18 + random() * 0.34;
+    context.lineWidth = 0.35 + random() * 0.75;
+    const x = random() * 128;
+    const y = random() * 128;
+    context.beginPath();
+    context.moveTo(x, y);
+    context.lineTo(x + (random() - 0.5) * 2.5, y + 2 + random() * 6);
+    context.stroke();
+  }
+  context.globalAlpha = 1;
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(5, 7);
+  texture.anisotropy = 4;
+  FUR_TEXTURES.set(species, texture);
+  return texture;
+}
 
 /* ========================================
    Bone helpers
@@ -68,6 +96,7 @@ function applyNeckBend(bones, angle) {
    Material enhancement — fur tint + shader
    ======================================== */
 function enhanceMaterials(root, config) {
+  const furDetail = getFurDetailTexture(config.species || config.id);
   root.traverse((child) => {
     if (!child.isMesh) return;
     child.castShadow = true;
@@ -81,6 +110,12 @@ function enhanceMaterials(root, config) {
       mat.roughness = 0.88;
       mat.metalness = 0.0;
       mat.envMapIntensity = 0.25;
+      if (mat.normalScale) mat.normalScale.set(1.35, 1.35);
+      if (furDetail) {
+        if (!mat.bumpMap) mat.bumpMap = furDetail;
+        mat.bumpScale = 0.022;
+        if (!mat.roughnessMap) mat.roughnessMap = furDetail;
+      }
 
       mat.onBeforeCompile = (shader) => {
         shader.vertexShader = shader.vertexShader.replace(
@@ -107,13 +142,17 @@ function enhanceMaterials(root, config) {
           float rim = 1.0 - max(dot(viewDir, vWorldNormal), 0.0);
           rim = pow(rim, 2.0) * 0.5;
           gl_FragColor.rgb += vec3(0.4, 0.28, 0.12) * rim;
-          float n1 = fract(sin(dot(vWorldPos.xz * 120.0, vec2(12.9898, 78.233))) * 43758.5453);
-          gl_FragColor.rgb *= 0.88 + n1 * 0.15;
+          float n1 = fract(sin(dot(vWorldPos.xz * 160.0, vec2(12.9898, 78.233))) * 43758.5453);
+          float fibers = pow(abs(sin(vWorldPos.y * 210.0 + n1 * 8.0)), 9.0);
+          gl_FragColor.rgb *= 0.86 + n1 * 0.16 + fibers * 0.08;
           float ao = pow(max(dot(vWorldNormal, vec3(0.0, 1.0, 0.0)), 0.0), 0.5);
           gl_FragColor.rgb *= 0.7 + ao * 0.3;
+          float backLight = pow(1.0 - abs(dot(viewDir, vWorldNormal)), 3.0);
+          gl_FragColor.rgb += vec3(0.18, 0.11, 0.05) * backLight;
           #include <dithering_fragment>`
         );
       };
+      mat.customProgramCacheKey = () => `wildlife-fur-${config.species || config.id}`;
       mat.needsUpdate = true;
     }
 
@@ -173,6 +212,7 @@ export default function Animal({
   onBehaviorUpdate,
 }) {
   const groupRef = useRef();
+  const presentationRef = useRef();
   const { scene, animations } = useGLTF(config.model);
 
   // Use SkeletonUtils.clone for proper skinned mesh cloning
@@ -186,6 +226,8 @@ export default function Animal({
   const terrainY = useRef(0);
   const behaviorPhase = useRef(0);
   const lastPosition = useRef(new THREE.Vector3());
+  const lastSafePosition = useRef(new THREE.Vector3());
+  const verticalVelocity = useRef(0);
   const stillTimer = useRef(0);
   const wasMoving = useRef(false);
 
@@ -197,13 +239,17 @@ export default function Animal({
   const spineBone = useRef(null);
 
   // AI + Stats
-  const animalAI = useAnimalAI(config.diet);
+  const animalAI = useAnimalAI(config.diet, config.species || config.id, config.id);
   const animalStats = useAnimalStats(config.decayRates);
   const aiWalking = useRef(false);
   const lastAIDest = useRef(null);
+  const movementSource = useRef(null);
+  const movementSpeed = useRef(config.walkSpeed);
+  const urgentNeed = useRef(null);
+  const collisionRadius = config.collisionRadius || 0.8;
+  const footSink = (config.species || config.id) === 'rabbit' ? 0.018 : 0.04;
 
   // User command tracking — use a serial number so every new click fires
-  const userDestSerial = useRef(0);
   const prevSerial = useRef(0);
   const prevForcedBehavior = useRef(null);
 
@@ -211,20 +257,21 @@ export default function Animal({
   useEffect(() => {
     // We'll update the position ref live in useFrame; just register with a dummy for now
     const posRef = { x: 0, y: 0, z: 0 };
-    registerAnimal(config.id, posRef);
+    registerAnimal(config.id, posRef, collisionRadius);
     return () => unregisterAnimal(config.id);
-  }, [config.id]);
+  }, [collisionRadius, config.id]);
 
   // Set initial position
   useEffect(() => {
     if (groupRef.current && config.spawnPos) {
       const [x, , z] = config.spawnPos;
-      const y = getTerrainHeight(x, z);
+      const y = getTerrainHeight(x, z) - footSink;
       groupRef.current.position.set(x, y, z);
       terrainY.current = y;
       lastPosition.current.set(x, y, z); // seed so frame-0 delta is zero
+      lastSafePosition.current.set(x, y, z);
     }
-  }, [config.spawnPos]);
+  }, [config.spawnPos, footSink]);
 
   // Enhance materials
   useEffect(() => {
@@ -289,14 +336,15 @@ export default function Animal({
     aiWalking.current = false;
     lastAIDest.current = null;
     setActiveDest(null);
-    // Immediately resume autonomous AI after arriving at user destination
-    animalAI.clearOverride();
+    if (movementSource.current === 'user') animalAI.clearOverride();
+    else animalAI.arrive();
+    movementSource.current = null;
   }, [playIdle, animalAI]);
 
-  const speed = isRunning ? config.runSpeed : config.walkSpeed;
-
   useAnimalMovement(groupRef, activeDest, {
-    moveSpeed: speed,
+    moveSpeed: () => movementSpeed.current,
+    collisionRadius,
+    selfId: config.id,
     onArrive: handleArrive,
   });
 
@@ -307,6 +355,12 @@ export default function Animal({
     if (destinationSerial === prevSerial.current) return;
     prevSerial.current = destinationSerial;
 
+    const dest = userDestination.clone();
+    dest.x = THREE.MathUtils.clamp(dest.x, -WORLD_HALF, WORLD_HALF);
+    dest.z = THREE.MathUtils.clamp(dest.z, -WORLD_HALF, WORLD_HALF);
+    if (isPondAt(dest.x, dest.z, 0.4)) return;
+    dest.y = getTerrainHeight(dest.x, dest.z);
+
     // Cancel any forced behavior
     prevForcedBehavior.current = null;
     aiWalking.current = false;
@@ -314,11 +368,19 @@ export default function Animal({
     animalAI.override();
     behaviorPhase.current = 0;
 
-    // Clone destination so we own the reference
-    const dest = userDestination.clone();
+    movementSource.current = 'user';
+    movementSpeed.current = isRunning ? config.runSpeed : config.walkSpeed;
     setActiveDest(dest);
     playWalk(isRunning);
-  }, [destinationSerial, userDestination, isRunning, playWalk, animalAI]);
+  }, [
+    destinationSerial,
+    userDestination,
+    isRunning,
+    playWalk,
+    animalAI,
+    config.runSpeed,
+    config.walkSpeed,
+  ]);
 
   // Forced behavior from UI buttons
   useEffect(() => {
@@ -344,16 +406,35 @@ export default function Animal({
     if (!groupRef.current) return;
     const pos = groupRef.current.position;
 
-    // Terrain tracking
-    const targetY = getTerrainHeight(pos.x, pos.z);
-    terrainY.current += (targetY - terrainY.current) * Math.min(1, 8 * delta);
-    pos.y = terrainY.current;
+    // The deep pond stays blocked; the shallow stream is intentionally passable.
+    if (isPondAt(pos.x, pos.z, 0.15)) {
+      pos.x = lastSafePosition.current.x;
+      pos.z = lastSafePosition.current.z;
+    }
 
-    // Collision resolution — push out of trees and other animals
-    resolveCollisions(pos, config.id, 0.8);
+    // Hard collisions apply only to trunks, large rocks, and other animals.
+    resolveCollisions(pos, config.id, collisionRadius);
+    pos.x = THREE.MathUtils.clamp(pos.x, -WORLD_HALF, WORLD_HALF);
+    pos.z = THREE.MathUtils.clamp(pos.z, -WORLD_HALF, WORLD_HALF);
+
+    if (isPondAt(pos.x, pos.z, 0.15)) {
+      pos.x = lastSafePosition.current.x;
+      pos.z = lastSafePosition.current.z;
+    }
+
+    const targetY = getTerrainHeight(pos.x, pos.z) - footSink;
+    if (pos.y > targetY + 0.005) {
+      verticalVelocity.current -= 20 * delta;
+      pos.y = Math.max(targetY, pos.y + verticalVelocity.current * delta);
+    } else {
+      pos.y = targetY;
+      verticalVelocity.current = 0;
+    }
+    terrainY.current = targetY;
+    lastSafePosition.current.copy(pos);
 
     // Update live position in collision registry
-    registerAnimal(config.id, pos);
+    registerAnimal(config.id, pos, collisionRadius);
 
     onPositionUpdate?.(config.id, pos);
 
@@ -388,27 +469,37 @@ export default function Animal({
     }
 
     // AI + Stats — forcedBehavior only if no user destination active
-    const hasUserDest = activeDest !== null;
-    const ai = animalAI.update(delta, pos, null, hasUserDest ? null : forcedBehavior);
-    const statsResult = animalStats.update(delta, ai.aiState);
+    const hasActiveMovement = activeDest !== null;
+    const hasUserMovement = hasActiveMovement && movementSource.current === 'user';
+    const ai = animalAI.update(
+      delta,
+      pos,
+      urgentNeed.current,
+      hasUserMovement ? null : forcedBehavior
+    );
+    const restorativeBehavior = ai.isPerforming ? ai.aiState : 'Idle';
+    const statsResult = animalStats.update(delta, restorativeBehavior);
+    urgentNeed.current = statsResult.urgentNeed;
 
     onStatsUpdate?.(config.id, statsResult);
     onBehaviorUpdate?.(config.id, ai.aiState);
 
     // AI autonomous movement — only when not under user/forced control
-    if (!hasUserDest && ai.destination && !aiWalking.current) {
+    if (!hasActiveMovement && ai.destination && !aiWalking.current) {
       if (ai.destination !== lastAIDest.current) {
         lastAIDest.current = ai.destination;
         aiWalking.current = true;
+        movementSource.current = 'ai';
+        movementSpeed.current = ai.shouldRun ? config.runSpeed : config.walkSpeed;
         setActiveDest(ai.destination.clone());
-        playWalk(false);
+        playWalk(ai.shouldRun);
       }
     }
 
     // Procedural behaviors
-    const doGraze = (ai.shouldGraze || ai.shouldHunt) && !userDestination;
-    const doDrink = ai.shouldDrink && !userDestination;
-    const doSleep = ai.shouldSleep && !userDestination;
+    const doGraze = (ai.shouldGraze || ai.shouldHunt) && !hasActiveMovement;
+    const doDrink = ai.shouldDrink && !hasActiveMovement;
+    const doSleep = ai.shouldSleep && !hasActiveMovement;
     const doIdle = !doGraze && !doDrink && !doSleep && idle;
 
     if (doGraze || doDrink || doSleep || doIdle) {
@@ -477,6 +568,24 @@ export default function Animal({
       applyBoneRot(tailBone.current, 'z', Math.sin(phase * 0.5) * 0.1 * easeT);
     }
 
+    // Lower and softly lean the visible model while sleeping. The root stays
+    // terrain-locked, so waking never causes hovering or sinking.
+    if (presentationRef.current) {
+      const targetLower = doSleep ? -SLEEP_BODY_LOWER : 0;
+      const targetLean = doSleep ? 0.12 : 0;
+      const poseFactor = 1 - Math.exp(-2.4 * delta);
+      presentationRef.current.position.y = THREE.MathUtils.lerp(
+        presentationRef.current.position.y,
+        targetLower,
+        poseFactor
+      );
+      presentationRef.current.rotation.z = THREE.MathUtils.lerp(
+        presentationRef.current.rotation.z,
+        targetLean,
+        poseFactor
+      );
+    }
+
     // IDLE look-around — use setBoneRot (absolute) not additive to avoid drift
     if (doIdle && phase > 2.0) {
       const lt = (phase % 6.0) / 6.0;
@@ -502,7 +611,15 @@ export default function Animal({
       onPointerOver={() => { document.body.style.cursor = 'pointer'; }}
       onPointerOut={() => { document.body.style.cursor = 'default'; }}
     >
-      <primitive object={clonedScene} scale={config.scale} />
+      {isSelected && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.035, 0]}>
+          <ringGeometry args={[1.05, 1.22, 40]} />
+          <meshBasicMaterial color="#b9ff93" transparent opacity={0.72} depthWrite={false} />
+        </mesh>
+      )}
+      <group ref={presentationRef}>
+        <primitive object={clonedScene} scale={config.scale} />
+      </group>
     </group>
   );
 }

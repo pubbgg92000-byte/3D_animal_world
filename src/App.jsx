@@ -7,18 +7,31 @@ import { ANIMAL_LIST } from './config/animalConfig';
 
 // Components
 import Animal from './components/Animal';
-import Ground from './components/Ground';
-import Trees from './components/Trees';
-import TallGrass from './components/TallGrass';
-import WaterPools from './components/WaterPools';
-import Fish from './components/Fish';
 import Pond, { PondStream } from './components/Pond';
-import SmallPrey from './components/SmallPrey';
 import Sky from './components/Sky';
 import FloatingParticles from './components/FloatingParticles';
 import CameraController from './components/CameraController';
 import LoadingScreen from './components/LoadingScreen';
 import UIOverlay from './components/UIOverlay';
+import AssetManager from './components/environment/AssetManager';
+import Forest from './components/environment/Forest/Forest';
+import Grass from './components/environment/Grass/Grass';
+import Terrain from './components/environment/Terrain/Terrain';
+
+const CANVAS_DPR = [1, 1.35];
+const SHADOW_CONFIG = { type: THREE.PCFShadowMap };
+const GL_CONFIG = {
+  antialias: true,
+  toneMapping: THREE.ACESFilmicToneMapping,
+  toneMappingExposure: 1.2,
+  outputColorSpace: THREE.SRGBColorSpace,
+};
+const CAMERA_CONFIG = {
+  fov: 45,
+  near: 0.1,
+  far: 500,
+  position: [8, 5, 10],
+};
 
 /* ========================================
    Error Boundary
@@ -47,20 +60,20 @@ function SceneLighting() {
   return (
     <>
       <directionalLight
-        position={[50, 30, -20]}
-        intensity={1.8}
-        color="#ffd59e"
+        position={[55, 55, -30]}
+        intensity={2.15}
+        color="#fff1cf"
         castShadow
         shadow-mapSize={[2048, 2048]}
-        shadow-camera-far={100}
-        shadow-camera-left={-30}
-        shadow-camera-right={30}
-        shadow-camera-top={30}
-        shadow-camera-bottom={-30}
+        shadow-camera-far={170}
+        shadow-camera-left={-60}
+        shadow-camera-right={60}
+        shadow-camera-top={60}
+        shadow-camera-bottom={-60}
         shadow-bias={-0.0005}
       />
-      <ambientLight intensity={0.35} color="#b4d4ff" />
-      <hemisphereLight skyColor="#87ceeb" groundColor="#3a5a1e" intensity={0.4} />
+      <ambientLight intensity={0.48} color="#cfe7ff" />
+      <hemisphereLight skyColor="#8ed4ff" groundColor="#52752f" intensity={0.62} />
     </>
   );
 }
@@ -187,35 +200,27 @@ export default function App() {
       />
 
       <Canvas
-        shadows
-        dpr={[1, 1.5]}
-        gl={{
-          antialias: true,
-          toneMapping: THREE.ACESFilmicToneMapping,
-          toneMappingExposure: 1.2,
-          outputColorSpace: THREE.SRGBColorSpace,
-        }}
-        camera={{
-          fov: 45,
-          near: 0.1,
-          far: 500,
-          position: [8, 5, 10],
-        }}
+        shadows={SHADOW_CONFIG}
+        dpr={CANVAS_DPR}
+        gl={GL_CONFIG}
+        camera={CAMERA_CONFIG}
       >
         <SceneLighting />
         <Sky />
-        <Ground
+        <Terrain
           onClick={handleGroundClick}
           onDoubleClick={handleGroundDoubleClick}
         />
-        <Trees />
-        <TallGrass />
-        <WaterPools />
+        <Grass />
         <Pond />
         <PondStream />
-        <Fish />
-        <SmallPrey />
         <FloatingParticles />
+
+        <Suspense fallback={null}>
+          <AssetManager>
+            <Forest />
+          </AssetManager>
+        </Suspense>
 
         <CameraController
           targetPosition={cameraTarget}

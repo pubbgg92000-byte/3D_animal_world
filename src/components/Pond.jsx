@@ -1,21 +1,36 @@
-import { useRef, useMemo } from 'react';
+import { useEffect, useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import {
+  POND_X,
+  POND_Z,
+  POND_RADIUS as WORLD_POND_RADIUS,
+  POND_WATER_Y,
+  STREAM_START_Z,
+  STREAM_END_Z,
+  streamCenterX,
+  streamHalfWidth,
+} from '../utils/world';
+import { registerStaticObstacles, unregisterStaticObstacles } from '../utils/collisionRegistry';
 
 /* ================================================================
    POND — full water level that overflows into a stream
    Stream flows from pond south edge to world boundary (z = +40)
    ================================================================ */
 
-export const POND_POSITION = new THREE.Vector3(0, 0, 5);
-export const POND_RADIUS   = 5.5;
+export const POND_POSITION = new THREE.Vector3(POND_X, 0, POND_Z);
+export const POND_RADIUS = WORLD_POND_RADIUS;
 
 // Water is now FULL — sits right at terrain rim level
-const WATER_Y  =  0.05;   // nearly flush with ground rim
+const WATER_Y  = POND_WATER_Y;
 const BED_Y    = -1.45;   // pond floor depth
 
 // Stream end — where animals drink (edge of 80×80 world, z-positive side)
-export const STREAM_END = new THREE.Vector3(0, 0, 38);
+export const STREAM_END = new THREE.Vector3(
+  streamCenterX(STREAM_END_Z),
+  0,
+  STREAM_END_Z
+);
 
 /* ================================================================
    Seeded RNG
@@ -155,7 +170,8 @@ function StreamWater() {
     fragmentShader: STREAM_WATER_FRAG,
     uniforms: { uTime: { value: 0 }, uCam: { value: new THREE.Vector3() } },
     transparent: true,
-    depthWrite: false,
+    depthTest: true,
+    depthWrite: true,
     side: THREE.DoubleSide,
   }), []);
 
@@ -165,13 +181,10 @@ function StreamWater() {
   });
 
   const streamGeo = useMemo(() => {
-    const startZ = 10.5;   // pond south edge in world Z
-    const endZ   = 38.0;   // world boundary
+    const startZ = STREAM_START_Z;
+    const endZ = STREAM_END_Z;
     const length = endZ - startZ;
     const segs   = 30;
-    const startW = 2.4;
-    const endW   = 0.9;
-
     const geo = new THREE.BufferGeometry();
     const verts = [];
     const uvs   = [];
@@ -180,8 +193,8 @@ function StreamWater() {
     for (let i = 0; i <= segs; i++) {
       const t = i / segs;
       const z = startZ + t * length;        // world z
-      const w = startW + (endW - startW) * t;
-      const slight = Math.sin(t * Math.PI * 2.5) * 0.3; // gentle meander x
+      const w = streamHalfWidth(z) * 2;
+      const slight = streamCenterX(z);
 
       verts.push(-w / 2 + slight, WATER_Y - 0.01, z);
       verts.push( w / 2 + slight, WATER_Y - 0.01, z);
@@ -202,13 +215,10 @@ function StreamWater() {
 
   // Stream bed / banks
   const bedGeo = useMemo(() => {
-    const startZ = 10.0;
-    const endZ   = 38.5;
+    const startZ = STREAM_START_Z - 0.5;
+    const endZ = STREAM_END_Z + 0.5;
     const length = endZ - startZ;
     const segs   = 30;
-    const startW = 3.2;
-    const endW   = 1.6;
-
     const geo = new THREE.BufferGeometry();
     const verts = [];
     const uvs   = [];
@@ -217,8 +227,8 @@ function StreamWater() {
     for (let i = 0; i <= segs; i++) {
       const t = i / segs;
       const z = startZ + t * length;
-      const w = startW + (endW - startW) * t;
-      const slight = Math.sin(t * Math.PI * 2.5) * 0.3;
+      const w = streamHalfWidth(z) * 2 + 0.8;
+      const slight = streamCenterX(z);
       verts.push(-w / 2 + slight, WATER_Y - 0.04, z);
       verts.push( w / 2 + slight, WATER_Y - 0.04, z);
       uvs.push(0, t, 1, t);
@@ -237,11 +247,11 @@ function StreamWater() {
   return (
     <group>
       {/* Muddy stream bed */}
-      <mesh geometry={bedGeo} renderOrder={1}>
+      <mesh geometry={bedGeo}>
         <meshStandardMaterial color="#3a2a12" roughness={0.97} />
       </mesh>
       {/* Flowing water surface */}
-      <mesh geometry={streamGeo} renderOrder={2}>
+      <mesh geometry={streamGeo}>
         <primitive object={streamMat} attach="material" />
       </mesh>
     </group>
@@ -307,19 +317,23 @@ const RIM_ROCKS = [
 ];
 
 function RimRocks({ radius }) {
-  const ROCK_COLORS = ['#8c8a7e','#727068','#a09c8e','#b4b0a0','#686460'];
+  const colors = ['#8c8a7e','#727068','#a09c8e','#b4b0a0','#686460'];
   return (
-    <group>
-      {RIM_ROCKS.map(([frac,rf,sx,sy,sz,tiltX,rotY], i) => {
-        const angle = frac * Math.PI * 2;
-        const r = radius * rf;
-        const px = Math.cos(angle)*r, pz = Math.sin(angle)*r;
-        const py = sy*0.35-0.15;
-        const tiltSign = i%2===0 ? 1 : -1;
+    <group name="pond-rim-rocks">
+      {RIM_ROCKS.map(([fraction,radiusFactor,sx,sy,sz,tiltX,rotY], index) => {
+        const angle = fraction * Math.PI * 2;
+        const distance = radius * radiusFactor;
         return (
-          <mesh key={i} position={[px,py,pz]} rotation={[tiltX*tiltSign,rotY,tiltX*0.5]} scale={[sx,sy,sz]} castShadow receiveShadow>
-            <dodecahedronGeometry args={[0.85,0]} />
-            <meshStandardMaterial color={ROCK_COLORS[i%ROCK_COLORS.length]} roughness={0.93} metalness={0.02} />
+          <mesh
+            key={index}
+            position={[Math.cos(angle) * distance, sy * 0.35 - 0.15, Math.sin(angle) * distance]}
+            rotation={[tiltX * (index % 2 === 0 ? 1 : -1), rotY, tiltX * 0.5]}
+            scale={[sx, sy, sz]}
+            castShadow
+            receiveShadow
+          >
+            <dodecahedronGeometry args={[0.85, 0]} />
+            <meshStandardMaterial color={colors[index % colors.length]} roughness={0.93} metalness={0.02} />
           </mesh>
         );
       })}
@@ -479,6 +493,22 @@ function RippleRing({ r, delay, speed, ox = 0, oz = 0 }) {
 export default function Pond() {
   const r = POND_RADIUS;
   const { x, y, z } = POND_POSITION;
+
+  useEffect(() => {
+    registerStaticObstacles(
+      'pond-boulders',
+      RIM_ROCKS.map(([fraction, radiusFactor, sx, , sz]) => {
+        const angle = fraction * Math.PI * 2;
+        const distance = r * radiusFactor;
+        return {
+          x: x + Math.cos(angle) * distance,
+          z: z + Math.sin(angle) * distance,
+          r: Math.max(sx, sz) * 0.58,
+        };
+      })
+    );
+    return () => unregisterStaticObstacles('pond-boulders');
+  }, [r, x, z]);
 
   return (
     <group position={[x, y, z]}>

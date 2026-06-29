@@ -59,6 +59,35 @@ canvas {
   pointer-events: none;
 }
 
+.world-hint {
+  position: absolute;
+  top: var(--spacing-lg);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 9px 18px;
+  max-width: calc(100vw - 140px);
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(18, 35, 29, 0.46);
+  border: 1px solid rgba(190, 244, 174, 0.16);
+  border-radius: var(--radius-pill);
+  backdrop-filter: blur(12px);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.world-hint strong {
+  color: #eaffdf;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.world-hint span { font-size: 0.62rem; }
+
 /* ========================================
    Loading Screen
    ======================================== */
@@ -378,8 +407,12 @@ canvas {
 .animal-selector {
   position: absolute;
   bottom: var(--spacing-lg);
-  left: var(--spacing-lg);
+  left: 50%;
+  transform: translateX(-50%);
   padding: var(--spacing-sm) var(--spacing-md);
+  max-width: calc(100vw - 32px);
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .animal-buttons {
@@ -401,6 +434,7 @@ canvas {
   cursor: pointer;
   transition: all var(--transition-fast);
   min-width: 68px;
+  flex: 0 0 74px;
 }
 
 .animal-btn:hover {
@@ -502,7 +536,8 @@ canvas {
 
 @media (max-width: 640px) {
   .settings-panel { min-width: 200px; max-width: 240px; }
-  .animal-selector { bottom: var(--spacing-md); left: var(--spacing-md); }
-  .animal-buttons { flex-wrap: wrap; }
+  .animal-selector { bottom: var(--spacing-md); max-width: calc(100vw - 20px); }
+  .world-hint { top: 12px; max-width: calc(100vw - 90px); white-space: normal; }
+  .world-hint span { display: none; }
   .flash-popup { font-size: 0.9rem; padding: 10px 20px; }
 }

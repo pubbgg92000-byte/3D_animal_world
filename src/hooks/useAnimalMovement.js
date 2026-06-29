@@ -1,140 +1,186 @@
 import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { TREE_OBSTACLES } from '../utils/collisionRegistry';
-
-/**
- * useAnimalMovement — smooth rotation + translation toward a destination,
- * with predictive obstacle avoidance: when a tree or world boundary is ahead,
- * the animal steers sideways rather than walking into it.
- */
+import { TREE_OBSTACLES, getAnimalObstacles } from '../utils/collisionRegistry';
+import { WORLD_HALF, isPondAt, isStreamAt } from '../utils/world';
 
 const FLIP_QUAT = new THREE.Quaternion().setFromAxisAngle(
   new THREE.Vector3(0, 1, 0),
   Math.PI
 );
 
-// Module-level reusables
-const _dir     = new THREE.Vector3();
-const _tgt     = new THREE.Quaternion();
-const _corr    = new THREE.Quaternion();
-const _mat     = new THREE.Matrix4();
-const _tmpPos  = new THREE.Vector3();
-const _ahead   = new THREE.Vector3();
-const _steer   = new THREE.Vector3();
+const _desired = new THREE.Vector3();
+const _steer = new THREE.Vector3();
+const _smooth = new THREE.Vector3();
+const _away = new THREE.Vector3();
+const _tangent = new THREE.Vector3();
+const _ahead = new THREE.Vector3();
+const _targetQuaternion = new THREE.Quaternion();
+const _correctedQuaternion = new THREE.Quaternion();
+const _lookMatrix = new THREE.Matrix4();
+const _lookPoint = new THREE.Vector3();
 
-const WORLD_HALF = 38; // animals stay within ±38 on x and z
+function stableSign(value) {
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) hash = ((hash << 5) - hash + value.charCodeAt(i)) | 0;
+  return hash % 2 === 0 ? 1 : -1;
+}
 
 export default function useAnimalMovement(
   groupRef,
   destination,
   {
-    moveSpeed        = 2.5,
-    rotationSpeed    = 5.0,
+    moveSpeed = 2.5,
+    rotationSpeed = 5,
     arrivalThreshold = 0.5,
-    turnThreshold    = 0.4,
+    turnThreshold = 0.62,
+    collisionRadius = 0.8,
+    selfId = '',
     onArrive,
   } = {}
 ) {
-  const hasArrived      = useRef(false);
-  const avoidStrength   = useRef(0);  // blended avoidance (0=none,1=max)
-  const avoidDir        = useRef(new THREE.Vector3());
+  const hasArrived = useRef(false);
+  const lastDestination = useRef(null);
+  const smoothDirection = useRef(new THREE.Vector3(0, 0, 1));
+  const avoidanceKey = useRef(null);
+  const avoidanceSide = useRef(1);
+  const avoidanceHold = useRef(0);
+  const progressAnchor = useRef(new THREE.Vector3());
+  const progressTimer = useRef(0);
+  const escapeTimer = useRef(0);
 
   useFrame((_, delta) => {
-    if (!groupRef.current || !destination) return;
+    const object = groupRef.current;
+    if (!object || !destination) return;
 
-    const obj = groupRef.current;
+    if (lastDestination.current !== destination) {
+      lastDestination.current = destination;
+      progressAnchor.current.copy(object.position);
+      progressTimer.current = 0;
+      escapeTimer.current = 0;
+      avoidanceKey.current = null;
+    }
 
-    _dir.copy(destination).sub(obj.position);
-    _dir.y = 0;
-    const dist = _dir.length();
-
-    if (dist < arrivalThreshold) {
+    _desired.copy(destination).sub(object.position).setY(0);
+    const distance = _desired.length();
+    if (distance < arrivalThreshold) {
       if (!hasArrived.current) {
         hasArrived.current = true;
-        avoidStrength.current = 0;
+        avoidanceKey.current = null;
         onArrive?.();
       }
       return;
     }
 
     hasArrived.current = false;
-    _dir.normalize();
+    _desired.normalize();
+    _steer.copy(_desired);
 
-    // ── Obstacle avoidance ─────────────────────────────────────────
-    // Look ahead along current facing by ~2 m; if any tree is within
-    // avoidance radius, compute a perpendicular steer direction.
-    const LOOK_AHEAD  = 2.2;
-    const AVOID_DIST  = 1.8;
+    const obstacles = TREE_OBSTACLES.concat(getAnimalObstacles(selfId, collisionRadius));
+    let blockingObstacle = null;
+    let bestScore = Infinity;
 
-    _ahead.copy(obj.position).addScaledVector(_dir, LOOK_AHEAD);
+    for (const obstacle of obstacles) {
+      const relativeX = obstacle.x - object.position.x;
+      const relativeZ = obstacle.z - object.position.z;
+      const forward = relativeX * _desired.x + relativeZ * _desired.z;
+      const lateral = Math.abs(relativeX * _desired.z - relativeZ * _desired.x);
+      const clearance = obstacle.r + collisionRadius + 0.38;
+      const directDistance = Math.hypot(relativeX, relativeZ);
+      const threatensPath = forward > -0.35 && forward < 4.6 && lateral < clearance;
+      const alreadyClose = directDistance < clearance + 0.35;
+      if (!threatensPath && !alreadyClose) continue;
 
-    let closestOb = null;
-    let closestD  = Infinity;
-
-    for (const ob of TREE_OBSTACLES) {
-      const dx = _ahead.x - ob.x;
-      const dz = _ahead.z - ob.z;
-      const d  = Math.sqrt(dx * dx + dz * dz);
-      if (d < ob.r + AVOID_DIST && d < closestD) {
-        closestD  = d;
-        closestOb = ob;
+      const score = Math.max(0, forward) + lateral * 0.3;
+      if (score < bestScore) {
+        bestScore = score;
+        blockingObstacle = obstacle;
       }
     }
 
-    // World boundary avoidance
-    let boundarySteer = false;
-    _steer.set(0, 0, 0);
-    if (Math.abs(_ahead.x) > WORLD_HALF) {
-      _steer.x = -Math.sign(_ahead.x) * 1.5;
-      boundarySteer = true;
-    }
-    if (Math.abs(_ahead.z) > WORLD_HALF) {
-      _steer.z = -Math.sign(_ahead.z) * 1.5;
-      boundarySteer = true;
-    }
+    _ahead.copy(object.position).addScaledVector(_desired, 2.5);
+    const waterAhead = isPondAt(_ahead.x, _ahead.z, 0.35);
+    const boundaryAhead = Math.abs(_ahead.x) > WORLD_HALF || Math.abs(_ahead.z) > WORLD_HALF;
 
-    if (closestOb) {
-      // Steer perpendicular to obstacle → animal direction (left or right)
-      const toOb = new THREE.Vector3(closestOb.x - obj.position.x, 0, closestOb.z - obj.position.z).normalize();
-      // Cross product with up gives perpendicular; pick whichever side faces destination more
-      const perpA = new THREE.Vector3(-toOb.z, 0, toOb.x);
-      const perpB = new THREE.Vector3( toOb.z, 0, -toOb.x);
-      const side  = perpA.dot(_dir) > perpB.dot(_dir) ? perpA : perpB;
-      _steer.add(side);
-    } else if (boundarySteer) {
-      // already set above
+    if (blockingObstacle || waterAhead || boundaryAhead) {
+      const key = blockingObstacle
+        ? `${Math.round(blockingObstacle.x * 5)}:${Math.round(blockingObstacle.z * 5)}`
+        : waterAhead
+          ? 'water'
+          : 'boundary';
+
+      if (avoidanceKey.current !== key || avoidanceHold.current <= 0) {
+        avoidanceKey.current = key;
+        avoidanceSide.current = stableSign(`${selfId}:${key}`);
+        avoidanceHold.current = 1.1;
+      }
+      avoidanceHold.current -= delta;
+
+      _tangent.set(-_desired.z * avoidanceSide.current, 0, _desired.x * avoidanceSide.current);
+      _steer.copy(_desired).multiplyScalar(0.42).addScaledVector(_tangent, 1.25);
+
+      if (blockingObstacle) {
+        _away
+          .set(
+            object.position.x - blockingObstacle.x,
+            0,
+            object.position.z - blockingObstacle.z
+          )
+          .normalize();
+        _steer.addScaledVector(_away, 1.15);
+      }
+
+      if (boundaryAhead) {
+        _steer.x += -Math.sign(_ahead.x) * Math.max(0, Math.abs(_ahead.x) - WORLD_HALF + 1);
+        _steer.z += -Math.sign(_ahead.z) * Math.max(0, Math.abs(_ahead.z) - WORLD_HALF + 1);
+      }
     } else {
-      // No obstacle — pure seek
-      _steer.copy(_dir);
+      avoidanceHold.current = Math.max(0, avoidanceHold.current - delta);
+      if (avoidanceHold.current === 0) avoidanceKey.current = null;
     }
 
-    // Blend steer
-    const needsAvoid = closestOb !== null || boundarySteer;
-    avoidStrength.current += needsAvoid
-      ? Math.min(1, delta * 6)
-      : -Math.min(avoidStrength.current, delta * 3);
-    avoidStrength.current = Math.max(0, Math.min(1, avoidStrength.current));
+    // Detect lack of forward progress and commit to one escape arc long enough
+    // to leave dense obstacle clusters instead of alternating left/right.
+    progressTimer.current += delta;
+    if (object.position.distanceToSquared(progressAnchor.current) > 0.36) {
+      progressAnchor.current.copy(object.position);
+      progressTimer.current = 0;
+    } else if (progressTimer.current > 1.4 && escapeTimer.current <= 0) {
+      escapeTimer.current = 1.35;
+      progressTimer.current = 0;
+      avoidanceSide.current = stableSign(`${selfId}:${Math.round(object.position.x)}:${Math.round(object.position.z)}`);
+    }
 
-    if (_steer.lengthSq() > 0) _steer.normalize();
+    if (escapeTimer.current > 0) {
+      escapeTimer.current -= delta;
+      _tangent.set(-_desired.z * avoidanceSide.current, 0, _desired.x * avoidanceSide.current);
+      _steer.addScaledVector(_tangent, 1.65);
+    }
 
-    const moveDir = new THREE.Vector3().lerpVectors(_dir, _steer, avoidStrength.current).normalize();
-    moveDir.y = 0; // always keep movement horizontal — prevent floating
+    if (_steer.lengthSq() < 0.001) _steer.copy(_desired);
+    _steer.normalize();
 
-    // ── Rotation ──────────────────────────────────────────────────
-    _tmpPos.copy(obj.position).addScaledVector(moveDir, 1);
-    _mat.lookAt(obj.position, _tmpPos, THREE.Object3D.DEFAULT_UP);
-    _tgt.setFromRotationMatrix(_mat);
-    _corr.copy(_tgt).multiply(FLIP_QUAT);
+    const steerFactor = 1 - Math.exp(-4.2 * delta);
+    _smooth.copy(smoothDirection.current).lerp(_steer, steerFactor).setY(0);
+    if (_smooth.lengthSq() > 0.001) smoothDirection.current.copy(_smooth.normalize());
 
-    const rotFactor = 1.0 - Math.exp(-rotationSpeed * delta);
-    obj.quaternion.slerp(_corr, rotFactor);
+    _lookPoint.copy(object.position).add(smoothDirection.current);
+    _lookMatrix.lookAt(object.position, _lookPoint, THREE.Object3D.DEFAULT_UP);
+    _targetQuaternion.setFromRotationMatrix(_lookMatrix);
+    _correctedQuaternion.copy(_targetQuaternion).multiply(FLIP_QUAT);
 
-    // ── Translation ───────────────────────────────────────────────
-    const angleDiff = obj.quaternion.angleTo(_corr);
-    if (angleDiff < turnThreshold) {
-      const step = Math.min(moveSpeed * delta, dist);
-      obj.position.addScaledVector(moveDir, step);
+    const rotationFactor = 1 - Math.exp(-rotationSpeed * delta);
+    object.quaternion.slerp(_correctedQuaternion, rotationFactor);
+
+    if (object.quaternion.angleTo(_correctedQuaternion) < turnThreshold) {
+      const baseSpeed = typeof moveSpeed === 'function' ? moveSpeed() : moveSpeed;
+      const speed = isStreamAt(object.position.x, object.position.z, 0.05)
+        ? baseSpeed * 0.68
+        : baseSpeed;
+      object.position.addScaledVector(
+        smoothDirection.current,
+        Math.min(speed * delta, distance)
+      );
     }
   });
 }

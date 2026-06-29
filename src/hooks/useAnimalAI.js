@@ -1,301 +1,223 @@
-import { useRef, useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import * as THREE from 'three';
 import { DIET } from '../config/animalConfig';
 import { TREE_POSITIONS } from '../components/Trees';
-import { WATER_POSITIONS } from '../components/WaterPools';
-import { POND_POSITION } from '../components/Pond';
 import { GRASS_POSITIONS } from '../components/TallGrass';
+import { getHerdCenter } from '../utils/collisionRegistry';
+import {
+  WORLD_HALF,
+  createWaterApproachPoints,
+  getTerrainHeight,
+  randomDryPoint,
+} from '../utils/world';
 
-// All drinkable water sources (pools + central pond)
-function getAllWaterSources() {
-  return [POND_POSITION, ...WATER_POSITIONS];
-}
-
-
-/* ========================================
-   AI Behavior States
-   ======================================== */
 export const AI_STATE = {
   IDLE: 'Idle',
   WANDER: 'Wander',
-  GRAZE: 'Graze',   // Herbivores eat grass
-  HUNT: 'Hunt',     // Carnivores eat fish/prey
+  GRAZE: 'Graze',
+  HUNT: 'Hunt',
   DRINK: 'Drink',
   SLEEP: 'Sleep',
 };
 
-/* ========================================
-   Terrain height — must match Ground.jsx
-   ======================================== */
-const HILL_AMPLITUDE = 1.2;
-const HILL_FREQUENCY = 0.04;
+const WATER_APPROACHES = createWaterApproachPoints();
+const WORLD_CENTER = new THREE.Vector3(0, 0, 0);
 
-function getTerrainHeight(x, z) {
-  const h1 = Math.sin(x * HILL_FREQUENCY) * Math.cos(z * HILL_FREQUENCY * 1.3);
-  const h2 =
-    Math.sin(x * HILL_FREQUENCY * 2.1 + 1.7) *
-    Math.cos(z * HILL_FREQUENCY * 1.7 + 0.5);
-  return (h1 * 0.6 + h2 * 0.4) * HILL_AMPLITUDE;
-}
-
-/* ========================================
-   Helpers
-   ======================================== */
-function findNearest(positions, pos, maxDist = 50) {
-  if (!positions || positions.length === 0) return null;
-  let best = null;
-  let bestDist = maxDist;
-  for (const p of positions) {
-    const d = pos.distanceTo(p);
-    if (d < bestDist) {
-      bestDist = d;
-      best = p;
+function nearestPoint(points, position, maxDistance = Infinity) {
+  let nearest = null;
+  let nearestDistance = maxDistance;
+  for (const point of points) {
+    const distance = position.distanceTo(point);
+    if (distance < nearestDistance) {
+      nearest = point;
+      nearestDistance = distance;
     }
   }
-  return best;
+  return nearest;
 }
 
-function randomPoint(center, radius) {
-  const angle = Math.random() * Math.PI * 2;
-  const r = Math.random() * radius;
-  const x = center.x + Math.cos(angle) * r;
-  const z = center.z + Math.sin(angle) * r;
-  return new THREE.Vector3(
-    Math.max(-50, Math.min(50, x)),
-    getTerrainHeight(x, z),
-    Math.max(-50, Math.min(50, z))
-  );
+function pointNearTree(position) {
+  const tree = nearestPoint(TREE_POSITIONS, position, 90);
+  if (!tree) return randomDryPoint(position, 10);
+  const away = new THREE.Vector3().subVectors(position, tree).setY(0);
+  if (away.lengthSq() < 0.01) away.set(1, 0, 0);
+  away.normalize().multiplyScalar(2.3);
+  const point = tree.clone().add(away);
+  point.y = getTerrainHeight(point.x, point.z);
+  return point;
 }
 
-/* ========================================
-   useAnimalAI Hook
-   ======================================== */
-export default function useAnimalAI(diet = DIET.HERBIVORE) {
+function grazingPoint(position) {
+  const grass = nearestPoint(GRASS_POSITIONS, position, 90);
+  return grass ? randomDryPoint(grass, 3) : randomDryPoint(position, 12);
+}
+
+function roamingPoint(position, herdCenter = null) {
+  if (herdCenter && Math.random() < 0.35) {
+    return randomDryPoint(herdCenter, 22);
+  }
+  return Math.random() < 0.68
+    ? randomDryPoint(WORLD_CENTER, WORLD_HALF - 5)
+    : randomDryPoint(position, 34);
+}
+
+export default function useAnimalAI(diet = DIET.HERBIVORE, species = null, animalId = null) {
   const state = useRef(AI_STATE.IDLE);
   const stateTimer = useRef(0);
-  const stateDuration = useRef(2 + Math.random() * 3);
-  const isOverridden = useRef(false);
-  const overrideTimer = useRef(0);
+  const stateDuration = useRef(4 + Math.random() * 4);
   const destination = useRef(null);
+  const arrived = useRef(true);
+  const userOverride = useRef(false);
+  const overrideTimer = useRef(0);
   const lastForcedBehavior = useRef(null);
+  const forcedRun = useRef(false);
 
-  const pickNextBehavior = useCallback(
-    (pos, urgentNeed) => {
-      // If there's an urgent need, prioritize it
-      if (urgentNeed === 'hunger') {
-        if (diet === DIET.CARNIVORE) {
-          // Carnivore → go to water pool to catch fish
-          const water = findNearest(getAllWaterSources(), pos, 80);
-          if (water) {
-            state.current = AI_STATE.HUNT;
-            stateDuration.current = 5 + Math.random() * 4;
-            const dir = new THREE.Vector3().subVectors(water, pos).normalize();
-            destination.current = water.clone().sub(dir.multiplyScalar(1.5));
-            destination.current.y = getTerrainHeight(destination.current.x, destination.current.z);
-            return;
-          }
-        } else {
-          // Herbivore → graze
-          const grass = findNearest(GRASS_POSITIONS, pos, 40);
-          if (grass) {
-            state.current = AI_STATE.GRAZE;
-            stateDuration.current = 6 + Math.random() * 5;
-            destination.current = randomPoint(grass, 2);
-            return;
-          }
-        }
-      }
+  const chooseRoamingPoint = useCallback(
+    (position) => roamingPoint(position, species ? getHerdCenter(species, animalId) : null),
+    [animalId, species]
+  );
 
-      if (urgentNeed === 'hydration') {
-        const water = findNearest(getAllWaterSources(), pos, 80);
-        if (water) {
-          state.current = AI_STATE.DRINK;
-          stateDuration.current = 5 + Math.random() * 3;
-          const dir = new THREE.Vector3().subVectors(water, pos).normalize();
-          destination.current = water.clone().sub(dir.multiplyScalar(1.8));
-          destination.current.y = getTerrainHeight(destination.current.x, destination.current.z);
-          return;
-        }
-      }
+  const begin = useCallback((nextState, nextDestination, duration) => {
+    state.current = nextState;
+    destination.current = nextDestination;
+    arrived.current = nextDestination === null;
+    stateTimer.current = 0;
+    stateDuration.current = duration;
+  }, []);
 
-      if (urgentNeed === 'energy') {
-        const tree = findNearest(TREE_POSITIONS, pos, 40);
-        if (tree) {
-          state.current = AI_STATE.SLEEP;
-          stateDuration.current = 8 + Math.random() * 6;
-          destination.current = randomPoint(tree, 2);
-          return;
-        }
-      }
+  const pickNextBehavior = useCallback((position, urgentNeed) => {
+    if (urgentNeed === 'hydration') {
+      begin(AI_STATE.DRINK, nearestPoint(WATER_APPROACHES, position)?.clone() || null, 10 + Math.random() * 6);
+      return;
+    }
 
-      // Normal random behavior selection
-      const roll = Math.random();
-
-      if (roll < 0.25) {
-        state.current = AI_STATE.WANDER;
-        stateDuration.current = 5 + Math.random() * 4;
-        destination.current = randomPoint(pos, 15);
-      } else if (roll < 0.50) {
-        if (diet === DIET.CARNIVORE) {
-          const water = findNearest(getAllWaterSources(), pos, 80);
-          if (water) {
-            state.current = AI_STATE.HUNT;
-            stateDuration.current = 5 + Math.random() * 4;
-            const dir = new THREE.Vector3().subVectors(water, pos).normalize();
-            destination.current = water.clone().sub(dir.multiplyScalar(1.5));
-            destination.current.y = getTerrainHeight(destination.current.x, destination.current.z);
-          } else {
-            state.current = AI_STATE.WANDER;
-            stateDuration.current = 4;
-            destination.current = randomPoint(pos, 12);
-          }
-        } else {
-          const grass = findNearest(GRASS_POSITIONS, pos, 40);
-          state.current = AI_STATE.GRAZE;
-          stateDuration.current = 6 + Math.random() * 5;
-          destination.current = grass ? randomPoint(grass, 2) : null;
-        }
-      } else if (roll < 0.72) {
-        const water = findNearest(getAllWaterSources(), pos, 80);
-        if (water) {
-          state.current = AI_STATE.DRINK;
-          stateDuration.current = 5 + Math.random() * 3;
-          const dir = new THREE.Vector3().subVectors(water, pos).normalize();
-          destination.current = water.clone().sub(dir.multiplyScalar(1.8));
-          destination.current.y = getTerrainHeight(destination.current.x, destination.current.z);
-        } else {
-          state.current = AI_STATE.IDLE;
-          stateDuration.current = 3;
-          destination.current = null;
-        }
+    if (urgentNeed === 'hunger') {
+      if (diet === DIET.CARNIVORE) {
+        begin(AI_STATE.HUNT, nearestPoint(WATER_APPROACHES, position)?.clone() || chooseRoamingPoint(position), 14 + Math.random() * 8);
       } else {
-        const tree = findNearest(TREE_POSITIONS, pos, 40);
-        if (tree) {
-          state.current = AI_STATE.SLEEP;
-          stateDuration.current = 8 + Math.random() * 6;
-          destination.current = randomPoint(tree, 2);
-        } else {
-          state.current = AI_STATE.IDLE;
-          stateDuration.current = 4;
-          destination.current = null;
-        }
+        begin(AI_STATE.GRAZE, grazingPoint(position), 16 + Math.random() * 10);
       }
-    },
-    [diet]
-  );
+      return;
+    }
 
-  const update = useCallback(
-    (delta, pos, urgentNeed, forcedBehavior = null) => {
-      // --- Forced behavior from UI buttons — only apply once per new value ---
-      if (forcedBehavior && forcedBehavior !== lastForcedBehavior.current) {
-        lastForcedBehavior.current = forcedBehavior;
-        isOverridden.current = false; // clear ground-click override
-        const fb = forcedBehavior.toLowerCase();
-        const stateMap = {
-          wander:      AI_STATE.WANDER,
-          walk:        AI_STATE.WANDER,
-          run:         AI_STATE.WANDER,
-          graze:       AI_STATE.GRAZE,
-          'hunt fish': AI_STATE.HUNT,
-          'hunt prey': AI_STATE.HUNT,
-          hunt:        AI_STATE.HUNT,
-          drink:       AI_STATE.DRINK,
-          sleep:       AI_STATE.SLEEP,
+    if (urgentNeed === 'energy') {
+      begin(AI_STATE.SLEEP, pointNearTree(position), 22 + Math.random() * 14);
+      return;
+    }
+
+    const roll = Math.random();
+    if (roll < 0.55) {
+      begin(AI_STATE.WANDER, chooseRoamingPoint(position), 20);
+    } else if (roll < 0.73) {
+      begin(
+        diet === DIET.CARNIVORE ? AI_STATE.HUNT : AI_STATE.GRAZE,
+        diet === DIET.CARNIVORE
+          ? nearestPoint(WATER_APPROACHES, position)?.clone() || chooseRoamingPoint(position)
+          : grazingPoint(position),
+        14 + Math.random() * 10
+      );
+    } else if (roll < 0.87) {
+      begin(AI_STATE.DRINK, nearestPoint(WATER_APPROACHES, position)?.clone() || null, 10 + Math.random() * 6);
+    } else {
+      begin(AI_STATE.SLEEP, pointNearTree(position), 20 + Math.random() * 14);
+    }
+  }, [begin, chooseRoamingPoint, diet]);
+
+  const applyForcedBehavior = useCallback((behavior, position) => {
+    const key = behavior.toLowerCase();
+    forcedRun.current = key === 'run';
+
+    if (key === 'walk' || key === 'run' || key === 'wander') {
+      begin(AI_STATE.WANDER, chooseRoamingPoint(position), 20);
+    } else if (key === 'graze') {
+      begin(AI_STATE.GRAZE, grazingPoint(position), 20);
+    } else if (key.includes('hunt')) {
+      begin(AI_STATE.HUNT, nearestPoint(WATER_APPROACHES, position)?.clone() || chooseRoamingPoint(position), 20);
+    } else if (key === 'drink') {
+      begin(AI_STATE.DRINK, nearestPoint(WATER_APPROACHES, position)?.clone() || null, 16);
+    } else if (key === 'sleep') {
+      begin(AI_STATE.SLEEP, pointNearTree(position), 30);
+    }
+  }, [begin, chooseRoamingPoint]);
+
+  const update = useCallback((delta, position, urgentNeed, forcedBehavior = null) => {
+    if (forcedBehavior && forcedBehavior !== lastForcedBehavior.current) {
+      lastForcedBehavior.current = forcedBehavior;
+      userOverride.current = false;
+      applyForcedBehavior(forcedBehavior, position);
+    } else if (!forcedBehavior) {
+      lastForcedBehavior.current = null;
+      forcedRun.current = false;
+    }
+
+    if (userOverride.current) {
+      overrideTimer.current += delta;
+      if (overrideTimer.current <= 30) {
+        return {
+          destination: null,
+          aiState: AI_STATE.WANDER,
+          isWalking: true,
+          isPerforming: false,
+          shouldRun: false,
+          shouldGraze: false,
+          shouldHunt: false,
+          shouldDrink: false,
+          shouldSleep: false,
         };
-        const mapped = stateMap[fb];
-        if (mapped) {
-          state.current = mapped;
-          stateTimer.current = 0;
-          stateDuration.current = 15;
-          destination.current = null; // will be set below
-          if (mapped === AI_STATE.WANDER) {
-            destination.current = randomPoint(pos, 14);
-          } else if (mapped === AI_STATE.GRAZE) {
-            const grass = findNearest(GRASS_POSITIONS, pos, 40);
-            destination.current = grass ? randomPoint(grass, 2) : randomPoint(pos, 8);
-          } else if (mapped === AI_STATE.DRINK || mapped === AI_STATE.HUNT) {
-            const water = findNearest(getAllWaterSources(), pos, 80);
-            if (water) {
-              const dir = new THREE.Vector3().subVectors(water, pos).normalize();
-              destination.current = water.clone().sub(dir.multiplyScalar(1.8));
-              destination.current.y = getTerrainHeight(destination.current.x, destination.current.z);
-            }
-          } else if (mapped === AI_STATE.SLEEP) {
-            const tree = findNearest(TREE_POSITIONS, pos, 40);
-            destination.current = tree ? randomPoint(tree, 3) : randomPoint(pos, 6);
-          }
-        }
-      } else if (!forcedBehavior) {
-        lastForcedBehavior.current = null;
       }
+      userOverride.current = false;
+      begin(AI_STATE.IDLE, null, 2);
+    }
 
-      if (isOverridden.current) {
-        overrideTimer.current += delta;
-        if (overrideTimer.current > 15) {
-          // Timeout — give up waiting and resume AI
-          isOverridden.current = false;
-          state.current = AI_STATE.IDLE;
-          stateTimer.current = 0;
-          stateDuration.current = 2;
-        } else {
-          return {
-            destination: null,
-            aiState: state.current,
-            isWalking: false,
-            shouldGraze: false,
-            shouldHunt: false,
-            shouldDrink: false,
-            shouldSleep: false,
-          };
-        }
-      }
+    const isPerforming = arrived.current && state.current !== AI_STATE.IDLE && state.current !== AI_STATE.WANDER;
+    if (arrived.current) stateTimer.current += delta;
 
-      stateTimer.current += delta;
+    if (state.current === AI_STATE.WANDER && arrived.current) {
+      begin(AI_STATE.IDLE, null, 3 + Math.random() * 5);
+    } else if (stateTimer.current >= stateDuration.current) {
+      if (state.current === AI_STATE.IDLE) pickNextBehavior(position, urgentNeed);
+      else begin(AI_STATE.IDLE, null, 4 + Math.random() * 5);
+    }
 
-      if (stateTimer.current > stateDuration.current) {
-        if (state.current === AI_STATE.IDLE) {
-          pickNextBehavior(pos, urgentNeed);
-        } else {
-          state.current = AI_STATE.IDLE;
-          stateDuration.current = 2 + Math.random() * 3;
-          destination.current = null;
-        }
-        stateTimer.current = 0;
-      }
-
-      const progress = stateTimer.current / stateDuration.current;
-      const hasDestination = destination.current !== null;
-
-      return {
-        destination: destination.current,
-        aiState: state.current,
-        isWalking:
-          hasDestination &&
-          (state.current === AI_STATE.WANDER ||
-            (progress < 0.4 && state.current !== AI_STATE.IDLE)),
-        shouldGraze: state.current === AI_STATE.GRAZE && progress > 0.3,
-        shouldHunt: state.current === AI_STATE.HUNT && progress > 0.3,
-        shouldDrink: state.current === AI_STATE.DRINK && progress > 0.3,
-        shouldSleep: state.current === AI_STATE.SLEEP && progress > 0.3,
-      };
-    },
-    [pickNextBehavior]
-  );
+    const performingNow = arrived.current && state.current !== AI_STATE.IDLE && state.current !== AI_STATE.WANDER;
+    return {
+      destination: arrived.current ? null : destination.current,
+      aiState: state.current,
+      isWalking: !arrived.current,
+      isPerforming: performingNow || isPerforming,
+      shouldRun: forcedRun.current && !arrived.current,
+      shouldGraze: performingNow && state.current === AI_STATE.GRAZE,
+      shouldHunt: performingNow && state.current === AI_STATE.HUNT,
+      shouldDrink: performingNow && state.current === AI_STATE.DRINK,
+      shouldSleep: performingNow && state.current === AI_STATE.SLEEP,
+    };
+  }, [applyForcedBehavior, begin, pickNextBehavior]);
 
   const override = useCallback(() => {
-    isOverridden.current = true;
+    userOverride.current = true;
     overrideTimer.current = 0;
     destination.current = null;
+    arrived.current = true;
     lastForcedBehavior.current = null;
   }, []);
 
   const clearOverride = useCallback(() => {
-    isOverridden.current = false;
+    userOverride.current = false;
     overrideTimer.current = 0;
-    state.current = AI_STATE.IDLE;
+    begin(AI_STATE.IDLE, null, 2 + Math.random() * 3);
+  }, [begin]);
+
+  const arrive = useCallback(() => {
+    arrived.current = true;
+    destination.current = null;
     stateTimer.current = 0;
-    stateDuration.current = 1 + Math.random() * 2; // pick new behaviour soon
   }, []);
 
-  return { update, override, clearOverride, getState: () => state.current };
+  return {
+    update,
+    override,
+    clearOverride,
+    arrive,
+    getState: () => state.current,
+  };
 }

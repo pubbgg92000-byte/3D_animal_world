@@ -23,8 +23,8 @@ export default function LoadingScreen() {
 
   return (
     <div className={`loading-screen ${fadeClass}`}>
-      <h1 className="loading-title">Interactive Moose</h1>
-      <p className="loading-subtitle">Preparing the meadow…</p>
+      <h1 className="loading-title">Wild Trails</h1>
+      <p className="loading-subtitle">Waking the forest…</p>
 
       <div className="loading-bar-container">
         <div

@@ -37,14 +37,14 @@ export default function useAnimalStats(decayRates = {}) {
     // Restore based on behavior
     switch (behavior) {
       case 'Sleep':
-        s.energy = Math.min(MAX, s.energy + 0.15 * delta * 100);
+        s.energy = Math.min(MAX, s.energy + 0.04 * delta * 100);
         break;
       case 'Drink':
-        s.hydration = Math.min(MAX, s.hydration + 0.25 * delta * 100);
+        s.hydration = Math.min(MAX, s.hydration + 0.06 * delta * 100);
         break;
       case 'Graze':
       case 'Hunt':
-        s.hunger = Math.min(MAX, s.hunger + 0.20 * delta * 100);
+        s.hunger = Math.min(MAX, s.hunger + 0.05 * delta * 100);
         break;
     }
 

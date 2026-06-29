@@ -1,14 +1,14 @@
 import { useRef } from 'react';
-import { Sky as DreiSky, Cloud } from '@react-three/drei';
+import { Cloud } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
 
 /* ========================================
    Constants — bright blue sky, midday feel
    ======================================== */
-const SUN_POSITION = [100, 80, -50];
-const FOG_COLOR = '#a8d4f0';
-const FOG_NEAR  = 60;
-const FOG_FAR   = 200;
+const FOG_COLOR = '#bfe5ff';
+const FOG_NEAR  = 90;
+const FOG_FAR   = 260;
 
 /* ========================================
    Sky Component
@@ -31,19 +31,35 @@ export default function Sky() {
 
   return (
     <>
+      <color attach="background" args={['#59b9f3']} />
       <fog attach="fog" args={[FOG_COLOR, FOG_NEAR, FOG_FAR]} />
 
-      {/* Bright blue sky — high sun, low turbidity */}
-      <DreiSky
-        distance={450000}
-        sunPosition={SUN_POSITION}
-        inclination={0.6}
-        azimuth={0.18}
-        mieCoefficient={0.003}
-        mieDirectionalG={0.85}
-        rayleigh={0.8}
-        turbidity={3}
-      />
+      {/* Stable blue gradient unaffected by scene tone mapping/exposure. */}
+      <mesh scale={230} renderOrder={-10}>
+        <sphereGeometry args={[1, 32, 18]} />
+        <shaderMaterial
+          side={THREE.BackSide}
+          depthWrite={false}
+          toneMapped={false}
+          vertexShader={`
+            varying vec3 vDirection;
+            void main() {
+              vDirection = normalize(position);
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `}
+          fragmentShader={`
+            varying vec3 vDirection;
+            void main() {
+              float height = smoothstep(-0.08, 0.85, vDirection.y);
+              vec3 horizon = vec3(0.72, 0.90, 1.0);
+              vec3 zenith = vec3(0.16, 0.56, 0.94);
+              vec3 color = mix(horizon, zenith, height);
+              gl_FragColor = vec4(color, 1.0);
+            }
+          `}
+        />
+      </mesh>
 
       {/* First cloud layer — main fluffy whites */}
       <group ref={cloudGroupRef}>

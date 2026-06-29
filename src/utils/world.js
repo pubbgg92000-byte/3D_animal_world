@@ -14,7 +14,15 @@ export const STREAM_END_Z = 55;
 export function baseTerrainHeight(x, z) {
   const h1 = Math.sin(x * 0.04) * Math.cos(z * 0.052);
   const h2 = Math.sin(x * 0.084 + 1.7) * Math.cos(z * 0.068 + 0.5);
-  return (h1 * 0.6 + h2 * 0.4) * 1.2;
+  const rollingGround = (h1 * 0.6 + h2 * 0.4) * 1.2;
+
+  // A broad northwest hill: high enough to read clearly in the landscape,
+  // but with a long natural slope that animals can traverse smoothly.
+  const hillX = (x + 42) / 22;
+  const hillZ = (z + 28) / 27;
+  const hill = Math.exp(-(hillX * hillX + hillZ * hillZ)) * 8.5;
+
+  return rollingGround + hill;
 }
 
 export function streamCenterX(z) {
@@ -63,12 +71,17 @@ export function getTerrainHeight(x, z) {
   return y;
 }
 
-export function isWaterAt(x, z, margin = 0) {
-  if (Math.hypot(x - POND_X, z - POND_Z) < POND_RADIUS - 0.35 + margin) {
-    return true;
-  }
+export function isPondAt(x, z, margin = 0) {
+  return Math.hypot(x - POND_X, z - POND_Z) < POND_RADIUS - 0.35 + margin;
+}
+
+export function isStreamAt(x, z, margin = 0) {
   if (z < STREAM_START_Z || z > STREAM_END_Z) return false;
   return Math.abs(x - streamCenterX(z)) < streamHalfWidth(z) + margin;
+}
+
+export function isWaterAt(x, z, margin = 0) {
+  return isPondAt(x, z, margin) || isStreamAt(x, z, margin);
 }
 
 export function clampToWorld(point, padding = 1.5) {

@@ -103,7 +103,7 @@ export default function UIOverlay({
       prevSelectedId.current = selectedAnimalId;
       const cfg = animalConfigs.find((c) => c.id === selectedAnimalId);
       if (cfg) {
-        setFlashMessage(`${ANIMAL_EMOJIS[cfg.id] || '🐾'} ${cfg.name} Selected`);
+        setFlashMessage(`${ANIMAL_EMOJIS[cfg.species || cfg.id] || '🐾'} ${cfg.name} Selected`);
         setSettingsOpen(true);
         const timer = setTimeout(() => setFlashMessage(null), 2000);
         return () => clearTimeout(timer);
@@ -117,10 +117,16 @@ export default function UIOverlay({
   );
   const selectedStats = animalStats[selectedAnimalId] || {};
   const selectedBehavior = animalBehaviors[selectedAnimalId] || 'Idle';
-  const actions = ANIMAL_ACTIONS[selectedAnimalId] || [];
+  const selectedSpecies = selectedConfig?.species || selectedAnimalId;
+  const actions = ANIMAL_ACTIONS[selectedSpecies] || [];
 
   return (
     <div id="ui-overlay" style={{ pointerEvents: 'none' }}>
+
+      <div className="world-hint">
+        <strong>Wild Trails</strong>
+        <span>Click ground to walk · Double-click to run · Click an animal to follow</span>
+      </div>
 
       {/* -------- Flash Popup (center) -------- */}
       {flashMessage && (
@@ -147,7 +153,7 @@ export default function UIOverlay({
               {/* Selected animal header */}
               <div className="panel-title">
                 <span className="animal-emoji">
-                  {ANIMAL_EMOJIS[selectedConfig.id] || '🐾'}
+                  {ANIMAL_EMOJIS[selectedSpecies] || '🐾'}
                 </span>
                 <span>{selectedConfig.name}</span>
                 <span className="behavior-badge">{selectedBehavior}</span>
@@ -173,6 +179,7 @@ export default function UIOverlay({
                         key={action}
                         className={`action-chip ${isActive ? 'active' : ''}`}
                         onClick={() => onForceAbility?.(action)}
+                        aria-pressed={isActive}
                         title={`Force ${action}`}
                       >
                         {action}
@@ -191,6 +198,7 @@ export default function UIOverlay({
                       key={mode}
                       className={`cam-chip ${cameraMode === mode ? 'active' : ''}`}
                       onClick={() => onCameraModeChange?.(mode)}
+                      aria-pressed={cameraMode === mode}
                     >
                       {{ follow: '🎯', fpv: '👁', aerial: '🦅', cinematic: '🎬', free: '🔓' }[mode]}{' '}
                       {mode.charAt(0).toUpperCase() + mode.slice(1)}
@@ -220,16 +228,18 @@ export default function UIOverlay({
             const stats = animalStats[cfg.id] || {};
             const behavior = animalBehaviors[cfg.id] || 'Idle';
             const isSelected = selectedAnimalId === cfg.id;
+            const species = cfg.species || cfg.id;
 
             return (
               <button
                 key={cfg.id}
                 className={`animal-btn ${isSelected ? 'selected' : ''}`}
                 onClick={() => onSelectAnimal?.(cfg.id)}
+                aria-pressed={isSelected}
                 title={`${cfg.name} — ${behavior}`}
               >
                 <span className="animal-btn-emoji">
-                  {ANIMAL_EMOJIS[cfg.id] || '🐾'}
+                  {ANIMAL_EMOJIS[species] || '🐾'}
                 </span>
                 <span className="animal-btn-name">{cfg.name}</span>
                 <div className="animal-btn-bars">

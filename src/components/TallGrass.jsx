@@ -1,20 +1,7 @@
 import { useMemo, useRef, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-
-/* ========================================
-   Terrain height — must match Ground.jsx
-   ======================================== */
-const HILL_AMPLITUDE = 1.2;
-const HILL_FREQUENCY = 0.04;
-
-function getTerrainHeight(x, z) {
-  const h1 = Math.sin(x * HILL_FREQUENCY) * Math.cos(z * HILL_FREQUENCY * 1.3);
-  const h2 =
-    Math.sin(x * HILL_FREQUENCY * 2.1 + 1.7) *
-    Math.cos(z * HILL_FREQUENCY * 1.7 + 0.5);
-  return (h1 * 0.6 + h2 * 0.4) * HILL_AMPLITUDE;
-}
+import { WORLD_HALF, getTerrainHeight, isWaterAt } from '../utils/world';
 
 /* ========================================
    Seeded random
@@ -31,8 +18,8 @@ function seededRandom(seed) {
    Tall Grass — instanced with shader wind
    ======================================== */
 
-const BLADE_COUNT = 2000;
-const GRASS_SPREAD = 55;
+const BLADE_COUNT = 3200;
+const GRASS_SPREAD = WORLD_HALF - 2;
 
 /** Exported grass patch positions for moose AI */
 export const GRASS_POSITIONS = [];
@@ -52,6 +39,7 @@ export default function TallGrass() {
     for (let i = 0; i < BLADE_COUNT; i++) {
       const x = (rng() - 0.5) * GRASS_SPREAD * 2;
       const z = (rng() - 0.5) * GRASS_SPREAD * 2;
+      if (isWaterAt(x, z, 1.4)) continue;
       const y = getTerrainHeight(x, z);
 
       const height = 0.3 + rng() * 0.7;

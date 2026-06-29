@@ -10,11 +10,11 @@ import * as THREE from 'three';
 const MODES = {
   /** Third-person follow — orbits around moose, user can pan/zoom/rotate */
   follow: {
-    offset: new THREE.Vector3(6, 3.5, 8),
+    offset: new THREE.Vector3(8, 8.5, 11),
     lookAtHeight: 1.5,
     autoRotate: true,
     autoRotateSpeed: 0.3,
-    minDistance: 3,
+    minDistance: 5,
     maxDistance: 40,
     minPolarAngle: 0.2,
     maxPolarAngle: Math.PI / 2.1,
@@ -150,6 +150,12 @@ export default function CameraController({
       const newPos = targetCenter.clone().add(currentOffset);
 
       camera.position.lerp(newPos, factor);
+    }
+
+    // Keep the follow camera above tree canopies and terrain. Without this,
+    // a roaming animal can drag the view through a trunk or dense leaves.
+    if (mode === 'follow') {
+      camera.position.y = Math.max(camera.position.y, moosePos.y + 8.25);
     }
 
     controls.update();
