@@ -77,6 +77,7 @@ export default function useAnimalAI(diet = DIET.HERBIVORE) {
   const isOverridden = useRef(false);
   const overrideTimer = useRef(0);
   const destination = useRef(null);
+  const lastForcedBehavior = useRef(null);
 
   const pickNextBehavior = useCallback(
     (pos, urgentNeed) => {
@@ -184,24 +185,69 @@ export default function useAnimalAI(diet = DIET.HERBIVORE) {
   );
 
   const update = useCallback(
-    (delta, pos, urgentNeed) => {
+    (delta, pos, urgentNeed, forcedBehavior = null) => {
+      // --- Forced behavior from UI buttons — only apply once per new value ---
+      if (forcedBehavior && forcedBehavior !== lastForcedBehavior.current) {
+        lastForcedBehavior.current = forcedBehavior;
+        isOverridden.current = false; // clear ground-click override
+        const fb = forcedBehavior.toLowerCase();
+        const stateMap = {
+          wander:      AI_STATE.WANDER,
+          walk:        AI_STATE.WANDER,
+          run:         AI_STATE.WANDER,
+          graze:       AI_STATE.GRAZE,
+          'hunt fish': AI_STATE.HUNT,
+          'hunt prey': AI_STATE.HUNT,
+          hunt:        AI_STATE.HUNT,
+          drink:       AI_STATE.DRINK,
+          sleep:       AI_STATE.SLEEP,
+        };
+        const mapped = stateMap[fb];
+        if (mapped) {
+          state.current = mapped;
+          stateTimer.current = 0;
+          stateDuration.current = 15;
+          destination.current = null; // will be set below
+          if (mapped === AI_STATE.WANDER) {
+            destination.current = randomPoint(pos, 14);
+          } else if (mapped === AI_STATE.GRAZE) {
+            const grass = findNearest(GRASS_POSITIONS, pos, 40);
+            destination.current = grass ? randomPoint(grass, 2) : randomPoint(pos, 8);
+          } else if (mapped === AI_STATE.DRINK || mapped === AI_STATE.HUNT) {
+            const water = findNearest(getAllWaterSources(), pos, 80);
+            if (water) {
+              const dir = new THREE.Vector3().subVectors(water, pos).normalize();
+              destination.current = water.clone().sub(dir.multiplyScalar(1.8));
+              destination.current.y = getTerrainHeight(destination.current.x, destination.current.z);
+            }
+          } else if (mapped === AI_STATE.SLEEP) {
+            const tree = findNearest(TREE_POSITIONS, pos, 40);
+            destination.current = tree ? randomPoint(tree, 3) : randomPoint(pos, 6);
+          }
+        }
+      } else if (!forcedBehavior) {
+        lastForcedBehavior.current = null;
+      }
+
       if (isOverridden.current) {
         overrideTimer.current += delta;
-        if (overrideTimer.current > 8) {
+        if (overrideTimer.current > 15) {
+          // Timeout — give up waiting and resume AI
           isOverridden.current = false;
           state.current = AI_STATE.IDLE;
           stateTimer.current = 0;
           stateDuration.current = 2;
+        } else {
+          return {
+            destination: null,
+            aiState: state.current,
+            isWalking: false,
+            shouldGraze: false,
+            shouldHunt: false,
+            shouldDrink: false,
+            shouldSleep: false,
+          };
         }
-        return {
-          destination: null,
-          aiState: state.current,
-          isWalking: false,
-          shouldGraze: false,
-          shouldHunt: false,
-          shouldDrink: false,
-          shouldSleep: false,
-        };
       }
 
       stateTimer.current += delta;
@@ -240,7 +286,16 @@ export default function useAnimalAI(diet = DIET.HERBIVORE) {
     isOverridden.current = true;
     overrideTimer.current = 0;
     destination.current = null;
+    lastForcedBehavior.current = null;
   }, []);
 
-  return { update, override, getState: () => state.current };
+  const clearOverride = useCallback(() => {
+    isOverridden.current = false;
+    overrideTimer.current = 0;
+    state.current = AI_STATE.IDLE;
+    stateTimer.current = 0;
+    stateDuration.current = 1 + Math.random() * 2; // pick new behaviour soon
+  }, []);
+
+  return { update, override, clearOverride, getState: () => state.current };
 }

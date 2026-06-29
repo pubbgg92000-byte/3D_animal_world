@@ -74,11 +74,13 @@ export default function App() {
 
   // Per-animal destinations (only selected animal gets one)
   const [destinations, setDestinations] = useState({});
+  const [destinationSerials, setDestinationSerials] = useState({});
   const [runningFor, setRunningFor] = useState({});
 
   // Per-animal stats and behaviors
   const [allStats, setAllStats] = useState({});
   const [allBehaviors, setAllBehaviors] = useState({});
+  const [forcedBehaviors, setForcedBehaviors] = useState({});
 
   // Camera
   const [cameraMode, setCameraMode] = useState('follow');
@@ -90,6 +92,7 @@ export default function App() {
     (point) => {
       if (!selectedId) return;
       setDestinations((prev) => ({ ...prev, [selectedId]: point }));
+      setDestinationSerials((prev) => ({ ...prev, [selectedId]: (prev[selectedId] || 0) + 1 }));
       setRunningFor((prev) => ({ ...prev, [selectedId]: false }));
     },
     [selectedId]
@@ -99,6 +102,7 @@ export default function App() {
     (point) => {
       if (!selectedId) return;
       setDestinations((prev) => ({ ...prev, [selectedId]: point }));
+      setDestinationSerials((prev) => ({ ...prev, [selectedId]: (prev[selectedId] || 0) + 1 }));
       setRunningFor((prev) => ({ ...prev, [selectedId]: true }));
     },
     [selectedId]
@@ -138,6 +142,23 @@ export default function App() {
     });
   }, []);
 
+  // Force a behavior from the UI — clears after 12s (handled by AI)
+  const handleForceAbility = useCallback((ability) => {
+    if (!selectedId) return;
+    setForcedBehaviors((prev) => ({ ...prev, [selectedId]: ability }));
+    // Auto-clear after 12 seconds so it doesn't get stuck
+    setTimeout(() => {
+      setForcedBehaviors((prev) => {
+        if (prev[selectedId] === ability) {
+          const next = { ...prev };
+          delete next[selectedId];
+          return next;
+        }
+        return prev;
+      });
+    }, 12000);
+  }, [selectedId]);
+
   // Camera target = selected animal position
   const cameraTarget = animalPositions.current[selectedId] || new THREE.Vector3();
 
@@ -162,6 +183,7 @@ export default function App() {
         cameraMode={cameraMode}
         onCameraModeChange={setCameraMode}
         onSelectAnimal={handleSelectAnimal}
+        onForceAbility={handleForceAbility}
       />
 
       <Canvas
@@ -207,8 +229,10 @@ export default function App() {
               <Animal
                 config={cfg}
                 destination={destinations[cfg.id] || null}
+                destinationSerial={destinationSerials[cfg.id] || 0}
                 isRunning={runningFor[cfg.id] || false}
                 isSelected={selectedId === cfg.id}
+                forcedBehavior={forcedBehaviors[cfg.id] || null}
                 onSelect={handleSelectAnimal}
                 onPositionUpdate={handlePositionUpdate}
                 onStatsUpdate={handleStatsUpdate}

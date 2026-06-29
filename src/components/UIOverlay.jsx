@@ -70,6 +70,7 @@ export default function UIOverlay({
   cameraMode = 'follow',
   onCameraModeChange,
   onSelectAnimal,
+  onForceAbility,
 }) {
   const [fps, setFps] = useState(60);
   const [flashMessage, setFlashMessage] = useState(null);
@@ -157,7 +158,7 @@ export default function UIOverlay({
               <StatBar label="Hydration" value={selectedStats.hydration ?? 100} color="#60a5fa" icon="💧" />
               <StatBar label="Hunger" value={selectedStats.hunger ?? 100} color="#f97316" icon="🍖" />
 
-              {/* Abilities */}
+              {/* Abilities — now clickable buttons */}
               <div className="actions-section">
                 <div className="actions-label">Abilities</div>
                 <div className="actions-list">
@@ -168,9 +169,14 @@ export default function UIOverlay({
                       (action === 'Hunt Fish' && selectedBehavior === 'Hunt') ||
                       (action === 'Hunt Prey' && selectedBehavior === 'Hunt');
                     return (
-                      <span key={action} className={`action-chip ${isActive ? 'active' : ''}`}>
+                      <button
+                        key={action}
+                        className={`action-chip ${isActive ? 'active' : ''}`}
+                        onClick={() => onForceAbility?.(action)}
+                        title={`Force ${action}`}
+                      >
                         {action}
-                      </span>
+                      </button>
                     );
                   })}
                 </div>

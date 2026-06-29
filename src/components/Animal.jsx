@@ -6,6 +6,7 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import useAnimalMovement from '../hooks/useAnimalMovement';
 import useAnimalAI from '../hooks/useAnimalAI';
 import useAnimalStats from '../hooks/useAnimalStats';
+import { registerAnimal, unregisterAnimal, resolveCollisions } from '../utils/collisionRegistry';
 
 /* ========================================
    Terrain height — must match Ground.jsx
@@ -162,8 +163,10 @@ function crossFadeToAnim(actions, currentAction, targetKey, fadeDuration = 0.3, 
 export default function Animal({
   config,
   destination: userDestination,
+  destinationSerial,     // incremented each click so same-point clicks still fire
   isRunning,
   isSelected,
+  forcedBehavior,        // 'Walk'|'Run'|'Graze'|'Drink'|'Sleep'|'Hunt Fish'|null
   onSelect,
   onPositionUpdate,
   onStatsUpdate,
@@ -195,6 +198,19 @@ export default function Animal({
   const animalStats = useAnimalStats(config.decayRates);
   const aiWalking = useRef(false);
   const lastAIDest = useRef(null);
+
+  // User command tracking — use a serial number so every new click fires
+  const userDestSerial = useRef(0);
+  const prevSerial = useRef(0);
+  const prevForcedBehavior = useRef(null);
+
+  // Register / unregister in collision system
+  useEffect(() => {
+    // We'll update the position ref live in useFrame; just register with a dummy for now
+    const posRef = { x: 0, y: 0, z: 0 };
+    registerAnimal(config.id, posRef);
+    return () => unregisterAnimal(config.id);
+  }, [config.id]);
 
   // Set initial position
   useEffect(() => {
@@ -265,8 +281,11 @@ export default function Animal({
   const handleArrive = useCallback(() => {
     playIdle();
     aiWalking.current = false;
+    lastAIDest.current = null;
     setActiveDest(null);
-  }, [playIdle]);
+    // Immediately resume autonomous AI after arriving at user destination
+    animalAI.clearOverride();
+  }, [playIdle, animalAI]);
 
   const speed = isRunning ? config.runSpeed : config.walkSpeed;
 
@@ -275,17 +294,35 @@ export default function Animal({
     onArrive: handleArrive,
   });
 
-  // User click → override AI
-  const prevUserDest = useRef(null);
+  // User click → override AI and go to destination
+  // We detect newness via destinationSerial (incremented on every click in App)
   useEffect(() => {
-    if (userDestination && userDestination !== prevUserDest.current) {
-      prevUserDest.current = userDestination;
-      animalAI.override();
-      behaviorPhase.current = 0;
-      setActiveDest(userDestination);
-      playWalk(isRunning);
-    }
-  }, [userDestination, isRunning, playWalk, animalAI]);
+    if (!userDestination || !destinationSerial) return;
+    if (destinationSerial === prevSerial.current) return;
+    prevSerial.current = destinationSerial;
+
+    // Cancel any forced behavior
+    prevForcedBehavior.current = null;
+    aiWalking.current = false;
+    lastAIDest.current = null;
+    animalAI.override();
+    behaviorPhase.current = 0;
+
+    // Clone destination so we own the reference
+    const dest = userDestination.clone();
+    setActiveDest(dest);
+    playWalk(isRunning);
+  }, [destinationSerial, userDestination, isRunning, playWalk, animalAI]);
+
+  // Forced behavior from UI buttons
+  useEffect(() => {
+    if (!forcedBehavior || forcedBehavior === prevForcedBehavior.current) return;
+    prevForcedBehavior.current = forcedBehavior;
+    // Reset AI so it picks up the forced state immediately
+    aiWalking.current = false;
+    lastAIDest.current = null;
+    setActiveDest(null);
+  }, [forcedBehavior]);
 
   // Click handler for selection
   const handleClick = useCallback(
@@ -306,21 +343,28 @@ export default function Animal({
     terrainY.current += (targetY - terrainY.current) * Math.min(1, 8 * delta);
     pos.y = terrainY.current;
 
+    // Collision resolution — push out of trees and other animals
+    resolveCollisions(pos, config.id, 0.8);
+
+    // Update live position in collision registry
+    registerAnimal(config.id, pos);
+
     onPositionUpdate?.(config.id, pos);
 
-    // AI + Stats
-    const ai = animalAI.update(delta, pos, null);
+    // AI + Stats — forcedBehavior only if no user destination active
+    const hasUserDest = activeDest !== null;
+    const ai = animalAI.update(delta, pos, null, hasUserDest ? null : forcedBehavior);
     const statsResult = animalStats.update(delta, ai.aiState);
 
     onStatsUpdate?.(config.id, statsResult);
     onBehaviorUpdate?.(config.id, ai.aiState);
 
-    // AI destination
-    if (ai.destination && !userDestination && !aiWalking.current) {
+    // AI autonomous movement — only when not under user/forced control
+    if (!hasUserDest && ai.destination && !aiWalking.current) {
       if (ai.destination !== lastAIDest.current) {
         lastAIDest.current = ai.destination;
         aiWalking.current = true;
-        setActiveDest(ai.destination);
+        setActiveDest(ai.destination.clone());
         playWalk(false);
       }
     }
@@ -386,20 +430,31 @@ export default function Animal({
       applyBoneRot(jawBone.current, 'x', jawAngle);
     }
 
-    // SLEEPING
+    // SLEEPING — sit on terrain, no floating
     if (doSleep) {
       const settleT = Math.min(1, phase / 2.5);
-      pos.y = terrainY.current - SLEEP_BODY_LOWER * smoothstep(settleT);
-      applyNeckBend(neckBones.current, 0.3 * smoothstep(settleT));
+      const easeT = smoothstep(settleT);
+      // Keep body ON the ground — never go below terrain
+      pos.y = terrainY.current;
+      applyNeckBend(neckBones.current, 0.4 * easeT);
       applyBoneRot(spineBone.current, 'x', Math.sin(phase * 0.8) * 0.025);
-      applyBoneRot(tailBone.current, 'z', Math.sin(phase * 0.5) * 0.1 * smoothstep(settleT));
+      applyBoneRot(tailBone.current, 'z', Math.sin(phase * 0.5) * 0.1 * easeT);
     }
 
-    // IDLE look-around
+    // IDLE look-around — use setBoneRot (absolute) not additive to avoid drift
     if (doIdle && phase > 2.0) {
       const lt = (phase % 6.0) / 6.0;
-      applyBoneRot(headBone.current, 'y', Math.sin(lt * Math.PI * 2) * 0.15);
-      applyBoneRot(tailBone.current, 'z', Math.sin(phase * 1.8) * 0.12);
+      // Set head rotation absolutely so it doesn't accumulate frame-over-frame
+      if (headBone.current) {
+        headBone.current.rotation.y = Math.sin(lt * Math.PI * 2) * 0.15;
+      }
+      if (tailBone.current) {
+        tailBone.current.rotation.z = Math.sin(phase * 1.8) * 0.12;
+      }
+    } else if (doIdle) {
+      // Reset head/tail when phase just started
+      if (headBone.current) headBone.current.rotation.y = 0;
+      if (tailBone.current) tailBone.current.rotation.z = 0;
     }
   });
 

@@ -1,6 +1,6 @@
-import { useMemo, useRef } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useMemo } from 'react';
 import * as THREE from 'three';
+import { registerTreeObstacles } from '../utils/collisionRegistry';
 
 /* ========================================
    Terrain height — must match Ground.jsx
@@ -102,7 +102,6 @@ export default function Trees() {
       const x = (rng() - 0.5) * FIELD_SIZE * 2;
       const z = (rng() - 0.5) * FIELD_SIZE * 2;
 
-      // Keep trees away from center (moose spawn area)
       const dist = Math.sqrt(x * x + z * z);
       if (dist < 8) continue;
 
@@ -113,6 +112,9 @@ export default function Trees() {
       trees.push({ x, y, z, scale, type, key: `tree-${i}` });
       TREE_POSITIONS.push(new THREE.Vector3(x, y, z));
     }
+
+    // Register static trunk collision circles
+    registerTreeObstacles(trees);
 
     return trees;
   }, []);

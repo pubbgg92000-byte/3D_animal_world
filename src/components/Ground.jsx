@@ -55,7 +55,7 @@ export default function Ground({ onClick, onDoubleClick }) {
   const meshRef = useRef();
   const grassRef = useRef();
 
-  // ---------- Terrain geometry ----------
+  // ---------- Terrain geometry — depressed in pond area ----------
 
   const geometry = useMemo(() => {
     const geo = new THREE.PlaneGeometry(
@@ -66,20 +66,42 @@ export default function Ground({ onClick, onDoubleClick }) {
     );
     geo.rotateX(-Math.PI / 2);
 
+    // Pool depression specs — must match WaterPools.jsx POOL_SPECS
+    const DEPRESSIONS = [
+      { x: 0,   z: 5,   r: 5.5,  depth: 1.6  }, // main pond
+      { x: 12,  z: 8,   r: 3.0,  depth: 0.55 },
+      { x: -15, z: 12,  r: 2.5,  depth: 0.50 },
+      { x: 20,  z: -10, r: 3.5,  depth: 0.60 },
+      { x: -8,  z: -18, r: 2.8,  depth: 0.52 },
+      { x: 25,  z: 22,  r: 2.2,  depth: 0.48 },
+      { x: -22, z: -8,  r: 3.0,  depth: 0.55 },
+    ];
+
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
       const z = pos.getZ(i);
-      pos.setY(i, terrainHeight(x, z));
+      let y = terrainHeight(x, z);
+
+      for (const dep of DEPRESSIONS) {
+        const dx = x - dep.x;
+        const dz = z - dep.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist < dep.r) {
+          const t = dist / dep.r;
+          const blend = t * t * (3 - 2 * t); // smoothstep
+          y = y * blend + (-dep.depth) * (1 - blend);
+        }
+      }
+
+      pos.setY(i, y);
     }
     pos.needsUpdate = true;
     geo.computeVertexNormals();
     return geo;
   }, []);
 
-  // ---------- Grass instanced mesh ----------
-
-  const { grassPositions, grassScales, grassRotations } = useMemo(() => {
+  const { grassPositions, grassScales, grassRotations, grassCount } = useMemo(() => {
     const positions = [];
     const scales = [];
     const rotations = [];
@@ -88,6 +110,24 @@ export default function Ground({ onClick, onDoubleClick }) {
     for (let i = 0; i < GRASS_COUNT; i++) {
       const x = (seededRandom(i * 3 + 0.1) * 2 - 1) * halfSize;
       const z = (seededRandom(i * 3 + 0.2) * 2 - 1) * halfSize;
+
+      // Skip grass inside pond or water pool areas
+      const GRASS_EXCLUSIONS = [
+        { x: 0,   z: 5,   r: 6.5  },
+        { x: 12,  z: 8,   r: 4.0  },
+        { x: -15, z: 12,  r: 3.5  },
+        { x: 20,  z: -10, r: 4.5  },
+        { x: -8,  z: -18, r: 3.8  },
+        { x: 25,  z: 22,  r: 3.2  },
+        { x: -22, z: -8,  r: 4.0  },
+      ];
+      let inWater = false;
+      for (const ex of GRASS_EXCLUSIONS) {
+        const dx = x - ex.x, dz = z - ex.z;
+        if (dx * dx + dz * dz < ex.r * ex.r) { inWater = true; break; }
+      }
+      if (inWater) continue;
+
       const y = terrainHeight(x, z);
       positions.push(x, y, z);
 
@@ -100,6 +140,7 @@ export default function Ground({ onClick, onDoubleClick }) {
       grassPositions: new Float32Array(positions),
       grassScales: new Float32Array(scales),
       grassRotations: new Float32Array(rotations),
+      grassCount: positions.length / 3,
     };
   }, []);
 
@@ -109,7 +150,7 @@ export default function Ground({ onClick, onDoubleClick }) {
     const time = clock.getElapsedTime();
     const dummy = new THREE.Object3D();
 
-    for (let i = 0; i < GRASS_COUNT; i++) {
+    for (let i = 0; i < grassCount; i++) {
       const x = grassPositions[i * 3];
       const y = grassPositions[i * 3 + 1];
       const z = grassPositions[i * 3 + 2];
@@ -117,7 +158,6 @@ export default function Ground({ onClick, onDoubleClick }) {
       dummy.position.set(x, y, z);
       dummy.scale.set(grassScales[i * 3], grassScales[i * 3 + 1], grassScales[i * 3 + 2]);
 
-      // Gentle wind sway
       const sway = Math.sin(time * 1.5 + x * 0.5 + z * 0.3) * 0.15;
       dummy.rotation.set(sway, grassRotations[i * 3 + 1], sway * 0.5);
 
@@ -197,7 +237,7 @@ export default function Ground({ onClick, onDoubleClick }) {
       {/* Grass blades (instanced boxes) */}
       <instancedMesh
         ref={grassRef}
-        args={[undefined, undefined, GRASS_COUNT]}
+        args={[undefined, undefined, grassCount]}
         castShadow={false}
         receiveShadow={false}
         frustumCulled={false}
