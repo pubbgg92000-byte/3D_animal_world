@@ -1,28 +1,82 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 
-/** Camera mode labels and icons */
-const CAMERA_MODES = [
-  { id: 'follow', label: 'Follow', icon: '🎯' },
-  { id: 'fpv', label: 'FPV', icon: '👁' },
-  { id: 'aerial', label: 'Aerial', icon: '🦅' },
-  { id: 'cinematic', label: 'Cinematic', icon: '🎬' },
-  { id: 'free', label: 'Free', icon: '🔓' },
-];
+/* ========================================
+   Stat Bar Component
+   ======================================== */
+function StatBar({ label, value, color, icon }) {
+  const percentage = Math.max(0, Math.min(100, value));
+  const barColor =
+    percentage < 20 ? '#ef4444' : percentage < 40 ? '#f59e0b' : color;
 
-/**
- * UIOverlay — stats, instructions, and camera mode switcher.
- */
+  return (
+    <div className="stat-bar-container">
+      <span className="stat-bar-label">
+        {icon} {label}
+      </span>
+      <div className="stat-bar-track">
+        <div
+          className="stat-bar-fill"
+          style={{
+            width: `${percentage}%`,
+            backgroundColor: barColor,
+          }}
+        />
+      </div>
+      <span className="stat-bar-value">{Math.round(percentage)}%</span>
+    </div>
+  );
+}
+
+/* ========================================
+   Mini Stat Bar — for unselected animals
+   ======================================== */
+function MiniStatBar({ value, color }) {
+  const p = Math.max(0, Math.min(100, value));
+  const c = p < 20 ? '#ef4444' : p < 40 ? '#f59e0b' : color;
+  return (
+    <div className="mini-stat-track">
+      <div className="mini-stat-fill" style={{ width: `${p}%`, backgroundColor: c }} />
+    </div>
+  );
+}
+
+/* ========================================
+   Animal Info
+   ======================================== */
+const ANIMAL_EMOJIS = {
+  moose: '🫎',
+  deer: '🦌',
+  bear: '🐻',
+  fox: '🦊',
+  rabbit: '🐇',
+};
+
+const ANIMAL_ACTIONS = {
+  moose: ['Walk', 'Run', 'Graze', 'Drink', 'Sleep'],
+  deer: ['Walk', 'Run', 'Graze', 'Drink', 'Sleep'],
+  bear: ['Walk', 'Run', 'Hunt Fish', 'Drink', 'Sleep'],
+  fox: ['Walk', 'Run', 'Hunt Prey', 'Drink', 'Sleep'],
+  rabbit: ['Walk', 'Run', 'Graze', 'Drink', 'Sleep'],
+};
+
+/* ========================================
+   UIOverlay Component
+   ======================================== */
 export default function UIOverlay({
-  animationName = 'Idle',
-  speed = 0,
+  selectedAnimalId,
+  animalConfigs = [],
+  animalStats = {},
+  animalBehaviors = {},
   cameraMode = 'follow',
   onCameraModeChange,
-  aiState = 'Idle',
+  onSelectAnimal,
 }) {
   const [fps, setFps] = useState(60);
-  const [instructionsVisible, setInstructionsVisible] = useState(true);
+  const [flashMessage, setFlashMessage] = useState(null);
+  const [settingsOpen, setSettingsOpen] = useState(true);
   const frameCount = useRef(0);
   const lastTime = useRef(performance.now());
+  const prevSelectedId = useRef(null);
 
   // FPS counter
   useEffect(() => {
@@ -42,95 +96,145 @@ export default function UIOverlay({
     return () => cancelAnimationFrame(animId);
   }, []);
 
-  // Auto-hide instructions
+  // Flash popup when selection changes
   useEffect(() => {
-    const timer = setTimeout(() => setInstructionsVisible(false), 15000);
-    return () => clearTimeout(timer);
-  }, []);
+    if (selectedAnimalId && selectedAnimalId !== prevSelectedId.current) {
+      prevSelectedId.current = selectedAnimalId;
+      const cfg = animalConfigs.find((c) => c.id === selectedAnimalId);
+      if (cfg) {
+        setFlashMessage(`${ANIMAL_EMOJIS[cfg.id] || '🐾'} ${cfg.name} Selected`);
+        setSettingsOpen(true);
+        const timer = setTimeout(() => setFlashMessage(null), 2000);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [selectedAnimalId, animalConfigs]);
 
-  // Re-show on keypress
-  const showInstructions = useCallback(() => {
-    setInstructionsVisible(true);
-    setTimeout(() => setInstructionsVisible(false), 6000);
-  }, []);
-
-  useEffect(() => {
-    window.addEventListener('keydown', showInstructions);
-    return () => window.removeEventListener('keydown', showInstructions);
-  }, [showInstructions]);
-
-  const displaySpeed = animationName === 'Idle' ? '0.0' : speed.toFixed(1);
+  const selectedConfig = useMemo(
+    () => animalConfigs.find((c) => c.id === selectedAnimalId),
+    [animalConfigs, selectedAnimalId]
+  );
+  const selectedStats = animalStats[selectedAnimalId] || {};
+  const selectedBehavior = animalBehaviors[selectedAnimalId] || 'Idle';
+  const actions = ANIMAL_ACTIONS[selectedAnimalId] || [];
 
   return (
-    <div className="ui-overlay">
-      {/* Stats — top left */}
-      <div className="stats-panel">
-        <h3>Scene Info</h3>
-        <div className="stat-row">
-          <span className="stat-label">Animation</span>
-          <span className="stat-value animation-name">{animationName}</span>
-        </div>
-        <div className="stat-row">
-          <span className="stat-label">Speed</span>
-          <span className="stat-value">{displaySpeed} m/s</span>
-        </div>
-        <div className="stat-row">
-          <span className="stat-label">FPS</span>
-          <span className="stat-value">{fps}</span>
-        </div>
-        <div className="stat-row">
-          <span className="stat-label">Camera</span>
-          <span className="stat-value animation-name">{cameraMode}</span>
-        </div>
-        <div className="stat-row">
-          <span className="stat-label">Behavior</span>
-          <span className="stat-value animation-name">{aiState}</span>
-        </div>
-      </div>
+    <div id="ui-overlay" style={{ pointerEvents: 'none' }}>
 
-      {/* Camera mode switcher — top right */}
-      <div className="camera-panel">
-        <h3>Camera Mode</h3>
-        <div className="camera-buttons">
-          {CAMERA_MODES.map((m) => (
-            <button
-              key={m.id}
-              className={`camera-btn ${cameraMode === m.id ? 'active' : ''}`}
-              onClick={() => onCameraModeChange?.(m.id)}
-              title={m.label}
-            >
-              <span className="camera-btn-icon">{m.icon}</span>
-              <span className="camera-btn-label">{m.label}</span>
-            </button>
-          ))}
+      {/* -------- Flash Popup (center) -------- */}
+      {flashMessage && (
+        <div className="flash-popup" style={{ pointerEvents: 'none' }}>
+          {flashMessage}
         </div>
-      </div>
+      )}
 
-      {/* Instructions — bottom center */}
-      <div className={`instructions-panel ${instructionsVisible ? '' : 'hidden'}`}>
-        <div className="instruction-item">
-          <span className="instruction-key">Click</span>
-          Walk to point
+      {/* -------- Settings Toggle Button (top-left corner) -------- */}
+      <button
+        className="settings-toggle"
+        style={{ pointerEvents: 'auto' }}
+        onClick={() => setSettingsOpen((o) => !o)}
+        title={settingsOpen ? 'Close Settings' : 'Open Settings'}
+      >
+        {settingsOpen ? '✕' : '⚙️'}
+      </button>
+
+      {/* -------- Settings Panel (top-left, collapsible) -------- */}
+      {settingsOpen && (
+        <div className="hud-panel settings-panel" style={{ pointerEvents: 'auto' }}>
+          {selectedConfig ? (
+            <>
+              {/* Selected animal header */}
+              <div className="panel-title">
+                <span className="animal-emoji">
+                  {ANIMAL_EMOJIS[selectedConfig.id] || '🐾'}
+                </span>
+                <span>{selectedConfig.name}</span>
+                <span className="behavior-badge">{selectedBehavior}</span>
+              </div>
+
+              {/* Stats */}
+              <StatBar label="Energy" value={selectedStats.energy ?? 100} color="#4ade80" icon="⚡" />
+              <StatBar label="Hydration" value={selectedStats.hydration ?? 100} color="#60a5fa" icon="💧" />
+              <StatBar label="Hunger" value={selectedStats.hunger ?? 100} color="#f97316" icon="🍖" />
+
+              {/* Abilities */}
+              <div className="actions-section">
+                <div className="actions-label">Abilities</div>
+                <div className="actions-list">
+                  {actions.map((action) => {
+                    const isActive =
+                      selectedBehavior === action ||
+                      (action === 'Walk' && selectedBehavior === 'Wander') ||
+                      (action === 'Hunt Fish' && selectedBehavior === 'Hunt') ||
+                      (action === 'Hunt Prey' && selectedBehavior === 'Hunt');
+                    return (
+                      <span key={action} className={`action-chip ${isActive ? 'active' : ''}`}>
+                        {action}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Camera modes */}
+              <div className="actions-section">
+                <div className="actions-label">Camera</div>
+                <div className="camera-buttons-inline">
+                  {['follow', 'fpv', 'aerial', 'cinematic', 'free'].map((mode) => (
+                    <button
+                      key={mode}
+                      className={`cam-chip ${cameraMode === mode ? 'active' : ''}`}
+                      onClick={() => onCameraModeChange?.(mode)}
+                    >
+                      {{ follow: '🎯', fpv: '👁', aerial: '🦅', cinematic: '🎬', free: '🔓' }[mode]}{' '}
+                      {mode.charAt(0).toUpperCase() + mode.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="stat-row" style={{ marginTop: '4px' }}>
+                <span className="stat-label">FPS</span>
+                <span className="stat-value fps-value">{fps}</span>
+              </div>
+            </>
+          ) : (
+            <div className="panel-title">
+              <span>🐾</span>
+              <span>Click an animal to select</span>
+            </div>
+          )}
         </div>
-        <div className="instruction-separator" />
-        <div className="instruction-item">
-          <span className="instruction-key">Dbl-Click</span>
-          Run to point
-        </div>
-        <div className="instruction-separator" />
-        <div className="instruction-item">
-          <span className="instruction-key">Drag</span>
-          Orbit camera
-        </div>
-        <div className="instruction-separator" />
-        <div className="instruction-item">
-          <span className="instruction-key">Scroll</span>
-          Zoom
-        </div>
-        <div className="instruction-separator" />
-        <div className="instruction-item">
-          <span className="instruction-key">Right-Drag</span>
-          Pan
+      )}
+
+      {/* -------- Animal Selector with mini bars (bottom-left) -------- */}
+      <div className="hud-panel animal-selector" style={{ pointerEvents: 'auto' }}>
+        <div className="animal-buttons">
+          {animalConfigs.map((cfg) => {
+            const stats = animalStats[cfg.id] || {};
+            const behavior = animalBehaviors[cfg.id] || 'Idle';
+            const isSelected = selectedAnimalId === cfg.id;
+
+            return (
+              <button
+                key={cfg.id}
+                className={`animal-btn ${isSelected ? 'selected' : ''}`}
+                onClick={() => onSelectAnimal?.(cfg.id)}
+                title={`${cfg.name} — ${behavior}`}
+              >
+                <span className="animal-btn-emoji">
+                  {ANIMAL_EMOJIS[cfg.id] || '🐾'}
+                </span>
+                <span className="animal-btn-name">{cfg.name}</span>
+                <div className="animal-btn-bars">
+                  <MiniStatBar value={stats.energy ?? 100} color="#4ade80" />
+                  <MiniStatBar value={stats.hydration ?? 100} color="#60a5fa" />
+                  <MiniStatBar value={stats.hunger ?? 100} color="#f97316" />
+                </div>
+                <span className="animal-btn-behavior">{behavior}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>

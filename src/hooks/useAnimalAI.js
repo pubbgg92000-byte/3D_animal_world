@@ -3,7 +3,14 @@ import * as THREE from 'three';
 import { DIET } from '../config/animalConfig';
 import { TREE_POSITIONS } from '../components/Trees';
 import { WATER_POSITIONS } from '../components/WaterPools';
+import { POND_POSITION } from '../components/Pond';
 import { GRASS_POSITIONS } from '../components/TallGrass';
+
+// All drinkable water sources (pools + central pond)
+function getAllWaterSources() {
+  return [POND_POSITION, ...WATER_POSITIONS];
+}
+
 
 /* ========================================
    AI Behavior States
@@ -77,7 +84,7 @@ export default function useAnimalAI(diet = DIET.HERBIVORE) {
       if (urgentNeed === 'hunger') {
         if (diet === DIET.CARNIVORE) {
           // Carnivore → go to water pool to catch fish
-          const water = findNearest(WATER_POSITIONS, pos, 60);
+          const water = findNearest(getAllWaterSources(), pos, 80);
           if (water) {
             state.current = AI_STATE.HUNT;
             stateDuration.current = 5 + Math.random() * 4;
@@ -99,7 +106,7 @@ export default function useAnimalAI(diet = DIET.HERBIVORE) {
       }
 
       if (urgentNeed === 'hydration') {
-        const water = findNearest(WATER_POSITIONS, pos, 60);
+        const water = findNearest(getAllWaterSources(), pos, 80);
         if (water) {
           state.current = AI_STATE.DRINK;
           stateDuration.current = 5 + Math.random() * 3;
@@ -129,7 +136,7 @@ export default function useAnimalAI(diet = DIET.HERBIVORE) {
         destination.current = randomPoint(pos, 15);
       } else if (roll < 0.50) {
         if (diet === DIET.CARNIVORE) {
-          const water = findNearest(WATER_POSITIONS, pos, 60);
+          const water = findNearest(getAllWaterSources(), pos, 80);
           if (water) {
             state.current = AI_STATE.HUNT;
             stateDuration.current = 5 + Math.random() * 4;
@@ -148,7 +155,7 @@ export default function useAnimalAI(diet = DIET.HERBIVORE) {
           destination.current = grass ? randomPoint(grass, 2) : null;
         }
       } else if (roll < 0.72) {
-        const water = findNearest(WATER_POSITIONS, pos, 60);
+        const water = findNearest(getAllWaterSources(), pos, 80);
         if (water) {
           state.current = AI_STATE.DRINK;
           stateDuration.current = 5 + Math.random() * 3;

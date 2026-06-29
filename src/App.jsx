@@ -2,12 +2,18 @@ import { Suspense, useState, useCallback, useRef, Component } from 'react';
 import { Canvas } from '@react-three/fiber';
 import * as THREE from 'three';
 
+// Config
+import { ANIMAL_LIST } from './config/animalConfig';
+
 // Components
-import Moose from './components/Moose';
+import Animal from './components/Animal';
 import Ground from './components/Ground';
 import Trees from './components/Trees';
 import TallGrass from './components/TallGrass';
 import WaterPools from './components/WaterPools';
+import Fish from './components/Fish';
+import Pond from './components/Pond';
+import SmallPrey from './components/SmallPrey';
 import Sky from './components/Sky';
 import FloatingParticles from './components/FloatingParticles';
 import CameraController from './components/CameraController';
@@ -15,17 +21,9 @@ import LoadingScreen from './components/LoadingScreen';
 import UIOverlay from './components/UIOverlay';
 
 /* ========================================
-   Constants
+   Error Boundary
    ======================================== */
-
-const WALK_SPEED = 2.5;
-const RUN_SPEED = 5.0;
-
-/* ========================================
-   Error Boundary — catches GLB load failures
-   ======================================== */
-
-class MooseErrorBoundary extends Component {
+class AnimalErrorBoundary extends Component {
   constructor(props) {
     super(props);
     this.state = { hasError: false };
@@ -34,7 +32,7 @@ class MooseErrorBoundary extends Component {
     return { hasError: true };
   }
   componentDidCatch(error) {
-    console.warn('[MooseErrorBoundary] Model failed to load:', error.message);
+    console.warn(`[AnimalError] ${this.props.animalId}:`, error.message);
   }
   render() {
     if (this.state.hasError) return null;
@@ -43,13 +41,11 @@ class MooseErrorBoundary extends Component {
 }
 
 /* ========================================
-   Lighting Sub-component
+   Lighting
    ======================================== */
-
 function SceneLighting() {
   return (
     <>
-      {/* Golden-hour directional sunlight */}
       <directionalLight
         position={[50, 30, -20]}
         intensity={1.8}
@@ -63,16 +59,8 @@ function SceneLighting() {
         shadow-camera-bottom={-30}
         shadow-bias={-0.0005}
       />
-
-      {/* Soft ambient fill */}
       <ambientLight intensity={0.35} color="#b4d4ff" />
-
-      {/* Warm hemisphere for sky/ground colour bleed */}
-      <hemisphereLight
-        skyColor="#87ceeb"
-        groundColor="#3a5a1e"
-        intensity={0.4}
-      />
+      <hemisphereLight skyColor="#87ceeb" groundColor="#3a5a1e" intensity={0.4} />
     </>
   );
 }
@@ -80,85 +68,105 @@ function SceneLighting() {
 /* ========================================
    App Component
    ======================================== */
-
 export default function App() {
-  // Moose destination and mode
-  const [destination, setDestination] = useState(null);
-  const [isRunning, setIsRunning] = useState(false);
+  // Selection
+  const [selectedId, setSelectedId] = useState('moose');
 
-  // Animation state for UI
-  const [animationName, setAnimationName] = useState('Idle');
+  // Per-animal destinations (only selected animal gets one)
+  const [destinations, setDestinations] = useState({});
+  const [runningFor, setRunningFor] = useState({});
 
-  // AI state for UI
-  const [aiState, setAIState] = useState('Idle');
+  // Per-animal stats and behaviors
+  const [allStats, setAllStats] = useState({});
+  const [allBehaviors, setAllBehaviors] = useState({});
 
-  // Camera mode
+  // Camera
   const [cameraMode, setCameraMode] = useState('follow');
-
-  // Moose position for camera
-  const moosePosition = useRef(new THREE.Vector3(0, 0, 0));
-
-  // Derive UI state label
-  const stateLabel =
-    animationName === 'Running'
-      ? 'Running'
-      : animationName === 'Walking'
-        ? 'Walking'
-        : 'Idle';
-
-  // Speed for UI display
-  const currentSpeed = isRunning ? RUN_SPEED : animationName !== 'Idle' ? WALK_SPEED : 0;
+  const animalPositions = useRef({});
 
   // ---------- Handlers ----------
 
-  const handleGroundClick = useCallback((point) => {
-    setDestination(point);
-    setIsRunning(false);
+  const handleGroundClick = useCallback(
+    (point) => {
+      if (!selectedId) return;
+      setDestinations((prev) => ({ ...prev, [selectedId]: point }));
+      setRunningFor((prev) => ({ ...prev, [selectedId]: false }));
+    },
+    [selectedId]
+  );
+
+  const handleGroundDoubleClick = useCallback(
+    (point) => {
+      if (!selectedId) return;
+      setDestinations((prev) => ({ ...prev, [selectedId]: point }));
+      setRunningFor((prev) => ({ ...prev, [selectedId]: true }));
+    },
+    [selectedId]
+  );
+
+  const handleSelectAnimal = useCallback((id) => {
+    setSelectedId(id);
   }, []);
 
-  const handleGroundDoubleClick = useCallback((point) => {
-    setDestination(point);
-    setIsRunning(true);
+  const handlePositionUpdate = useCallback((id, pos) => {
+    if (!animalPositions.current[id]) {
+      animalPositions.current[id] = new THREE.Vector3();
+    }
+    animalPositions.current[id].copy(pos);
   }, []);
 
-  const handleArrive = useCallback(() => {
-    setDestination(null);
-    setIsRunning(false);
-    setAnimationName('Idle');
+  const handleStatsUpdate = useCallback((id, stats) => {
+    setAllStats((prev) => {
+      // Only update if values changed significantly (avoid re-render spam)
+      const old = prev[id];
+      if (
+        old &&
+        Math.abs(old.energy - stats.energy) < 0.5 &&
+        Math.abs(old.hydration - stats.hydration) < 0.5 &&
+        Math.abs(old.hunger - stats.hunger) < 0.5
+      ) {
+        return prev;
+      }
+      return { ...prev, [id]: stats };
+    });
   }, []);
 
-  const handleAnimChange = useCallback((name) => {
-    setAnimationName(name);
+  const handleBehaviorUpdate = useCallback((id, behavior) => {
+    setAllBehaviors((prev) => {
+      if (prev[id] === behavior) return prev;
+      return { ...prev, [id]: behavior };
+    });
   }, []);
 
-  const handlePositionUpdate = useCallback((pos) => {
-    moosePosition.current.copy(pos);
-  }, []);
+  // Camera target = selected animal position
+  const cameraTarget = animalPositions.current[selectedId] || new THREE.Vector3();
 
-  const handleAIStateChange = useCallback((state) => {
-    setAIState(state);
-  }, []);
-
-  // ---------- Render ----------
+  // State label for camera
+  const selectedBehavior = allBehaviors[selectedId] || 'Idle';
+  const mooseState =
+    selectedBehavior === 'Wander' || selectedBehavior === 'Hunt'
+      ? 'Walking'
+      : selectedBehavior === 'Sleep'
+        ? 'Idle'
+        : 'Idle';
 
   return (
     <>
-      {/* Loading overlay */}
       <LoadingScreen />
 
-      {/* HUD overlay */}
       <UIOverlay
-        animationName={animationName}
-        speed={currentSpeed}
+        selectedAnimalId={selectedId}
+        animalConfigs={ANIMAL_LIST}
+        animalStats={allStats}
+        animalBehaviors={allBehaviors}
         cameraMode={cameraMode}
         onCameraModeChange={setCameraMode}
-        aiState={aiState}
+        onSelectAnimal={handleSelectAnimal}
       />
 
-      {/* 3D Canvas */}
       <Canvas
         shadows
-        dpr={[1, 2]}
+        dpr={[1, 1.5]}
         gl={{
           antialias: true,
           toneMapping: THREE.ACESFilmicToneMapping,
@@ -172,7 +180,6 @@ export default function App() {
           position: [8, 5, 10],
         }}
       >
-        {/* Environment */}
         <SceneLighting />
         <Sky />
         <Ground
@@ -182,28 +189,34 @@ export default function App() {
         <Trees />
         <TallGrass />
         <WaterPools />
+        <Pond />
+        <Fish />
+        <SmallPrey />
         <FloatingParticles />
 
-        {/* Camera system */}
         <CameraController
-          targetPosition={moosePosition.current}
+          targetPosition={cameraTarget}
           mode={cameraMode}
-          mooseState={stateLabel}
+          mooseState={mooseState}
         />
 
-        {/* Moose with AI */}
-        <MooseErrorBoundary>
-          <Suspense fallback={null}>
-            <Moose
-              destination={destination}
-              isRunning={isRunning}
-              onAnimChange={handleAnimChange}
-              onArrive={handleArrive}
-              onPositionUpdate={handlePositionUpdate}
-              onAIStateChange={handleAIStateChange}
-            />
-          </Suspense>
-        </MooseErrorBoundary>
+        {/* Spawn all animals */}
+        {ANIMAL_LIST.map((cfg) => (
+          <AnimalErrorBoundary key={cfg.id} animalId={cfg.id}>
+            <Suspense fallback={null}>
+              <Animal
+                config={cfg}
+                destination={destinations[cfg.id] || null}
+                isRunning={runningFor[cfg.id] || false}
+                isSelected={selectedId === cfg.id}
+                onSelect={handleSelectAnimal}
+                onPositionUpdate={handlePositionUpdate}
+                onStatsUpdate={handleStatsUpdate}
+                onBehaviorUpdate={handleBehaviorUpdate}
+              />
+            </Suspense>
+          </AnimalErrorBoundary>
+        ))}
       </Canvas>
     </>
   );

@@ -43,7 +43,7 @@ export const ANIMALS = {
     // Base tint color for fur (applied as material.color)
     furTint: '#d4b896',
     // Spawn position
-    spawnPos: [0, 0, 0],
+    spawnPos: [-8, 0, 0],
     // Stats decay rates (per second)
     decayRates: { energy: 0.008, hydration: 0.012, hunger: 0.010 },
   },
@@ -72,7 +72,7 @@ export const ANIMALS = {
       spine: 'Spine1',
     },
     furTint: '#c4975a',
-    spawnPos: [15, 0, -10],
+    spawnPos: [14, 0, -8],
     decayRates: { energy: 0.009, hydration: 0.013, hunger: 0.011 },
   },
 
@@ -161,8 +161,8 @@ export const ANIMALS = {
   },
 };
 
-/** Array form for iteration */
-export const ANIMAL_LIST = Object.values(ANIMALS);
+/** Array form — only active animals */
+export const ANIMAL_LIST = [ANIMALS.moose, ANIMALS.deer];
 
 /** Get config by ID */
 export function getAnimalConfig(id) {

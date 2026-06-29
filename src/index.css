@@ -1,46 +1,35 @@
 /* ========================================
-   Interactive Moose Demo — Global Styles
+   Wildlife Ecosystem — Global Styles
    ======================================== */
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 :root {
-  /* Color tokens */
   --color-bg: #0a0f0d;
   --color-text: #e8ede9;
   --color-text-muted: rgba(232, 237, 233, 0.55);
   --color-accent: #7dd87d;
   --color-accent-warm: #f4c542;
-  --color-glass-bg: rgba(10, 15, 13, 0.45);
+  --color-glass-bg: rgba(10, 15, 13, 0.55);
   --color-glass-border: rgba(232, 237, 233, 0.08);
   --color-progress-track: rgba(255, 255, 255, 0.06);
-  --color-progress-fill-start: #7dd87d;
-  --color-progress-fill-end: #f4c542;
 
-  /* Spacing */
   --spacing-xs: 0.25rem;
   --spacing-sm: 0.5rem;
   --spacing-md: 1rem;
   --spacing-lg: 1.5rem;
   --spacing-xl: 2rem;
 
-  /* Radii */
   --radius-sm: 6px;
   --radius-md: 12px;
   --radius-lg: 20px;
   --radius-pill: 999px;
 
-  /* Transitions */
   --transition-fast: 150ms ease;
   --transition-normal: 300ms ease;
-  --transition-slow: 600ms ease;
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+* { margin: 0; padding: 0; box-sizing: border-box; }
 
 html, body, #root {
   width: 100%;
@@ -50,18 +39,24 @@ html, body, #root {
   background: var(--color-bg);
   color: var(--color-text);
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
 }
-
-/* ========================================
-   Canvas
-   ======================================== */
 
 canvas {
   display: block;
   width: 100% !important;
   height: 100% !important;
   touch-action: none;
+}
+
+/* ========================================
+   UI Overlay — sits above canvas
+   ======================================== */
+
+#ui-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
 }
 
 /* ========================================
@@ -81,9 +76,7 @@ canvas {
 }
 
 .loading-screen.fade-out {
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
+  opacity: 0; visibility: hidden; pointer-events: none;
 }
 
 .loading-title {
@@ -91,17 +84,13 @@ canvas {
   font-weight: 300;
   letter-spacing: 0.15em;
   text-transform: uppercase;
-  color: var(--color-text);
   margin-bottom: var(--spacing-xl);
-  opacity: 0.9;
 }
 
 .loading-subtitle {
   font-size: 0.85rem;
-  font-weight: 400;
   color: var(--color-text-muted);
   margin-bottom: var(--spacing-lg);
-  letter-spacing: 0.05em;
 }
 
 .loading-bar-container {
@@ -116,11 +105,7 @@ canvas {
 .loading-bar-fill {
   height: 100%;
   border-radius: var(--radius-pill);
-  background: linear-gradient(
-    90deg,
-    var(--color-progress-fill-start),
-    var(--color-progress-fill-end)
-  );
+  background: linear-gradient(90deg, #7dd87d, #f4c542);
   transition: width 0.3s ease-out;
   box-shadow: 0 0 12px rgba(125, 216, 125, 0.3);
 }
@@ -131,23 +116,13 @@ canvas {
   font-weight: 500;
   color: var(--color-accent);
   letter-spacing: 0.1em;
-  font-variant-numeric: tabular-nums;
 }
 
-/* Loading shimmer animation */
 .loading-bar-container::after {
   content: '';
   position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.08),
-    transparent
-  );
+  top: 0; left: -100%; width: 100%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent);
   animation: shimmer 2s ease-in-out infinite;
 }
 
@@ -157,183 +132,359 @@ canvas {
 }
 
 /* ========================================
-   UI Overlay
+   HUD Panel — Glassmorphism base
    ======================================== */
 
-.ui-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 10;
-  pointer-events: none;
-}
-
-/* Stats panel — top left */
-.stats-panel {
-  position: absolute;
-  top: var(--spacing-lg);
-  left: var(--spacing-lg);
-  padding: var(--spacing-md) var(--spacing-lg);
+.hud-panel {
   background: var(--color-glass-bg);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--color-glass-border);
   border-radius: var(--radius-md);
-  min-width: 180px;
+  padding: var(--spacing-md) var(--spacing-lg);
 }
 
-.stats-panel h3 {
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: var(--spacing-sm);
+}
+
+.panel-title.small {
   font-size: 0.6rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.15em;
   color: var(--color-text-muted);
-  margin-bottom: var(--spacing-sm);
+}
+
+.animal-emoji {
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
+.behavior-badge {
+  margin-left: auto;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--color-accent-warm);
+  background: rgba(244, 197, 66, 0.12);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  text-transform: capitalize;
+}
+
+/* ========================================
+   Settings Toggle — top-left corner button
+   ======================================== */
+
+.settings-toggle {
+  position: absolute;
+  top: var(--spacing-lg);
+  left: var(--spacing-lg);
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-glass-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-md);
+  font-size: 1.1rem;
+  color: var(--color-text);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  z-index: 20;
+}
+
+.settings-toggle:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(125, 216, 125, 0.3);
+}
+
+/* ========================================
+   Settings Panel — top-left, below toggle
+   ======================================== */
+
+.settings-panel {
+  position: absolute;
+  top: calc(var(--spacing-lg) + 46px);
+  left: var(--spacing-lg);
+  min-width: 240px;
+  max-width: 280px;
+  animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+  0% { opacity: 0; transform: translateY(-8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* ========================================
+   Stat Bars — full
+   ======================================== */
+
+.stat-bar-container {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: 3px 0;
+}
+
+.stat-bar-label {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  min-width: 80px;
+  white-space: nowrap;
+}
+
+.stat-bar-track {
+  flex: 1;
+  height: 6px;
+  background: var(--color-progress-track);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  min-width: 60px;
+}
+
+.stat-bar-fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  transition: width 0.3s ease, background-color 0.5s ease;
+}
+
+.stat-bar-value {
+  font-size: 0.65rem;
+  font-weight: 600;
+  min-width: 30px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .stat-row {
   display: flex;
   justify-content: space-between;
-  align-items: center;
   padding: var(--spacing-xs) 0;
 }
 
 .stat-label {
-  font-size: 0.75rem;
-  font-weight: 400;
+  font-size: 0.72rem;
   color: var(--color-text-muted);
 }
 
 .stat-value {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   font-weight: 600;
   color: var(--color-accent);
   font-variant-numeric: tabular-nums;
 }
 
-.stat-value.animation-name {
-  color: var(--color-accent-warm);
-  text-transform: capitalize;
-}
-
-/* Instructions panel — bottom center */
-.instructions-panel {
-  position: absolute;
-  bottom: var(--spacing-xl);
-  left: 50%;
-  transform: translateX(-50%);
-  padding: var(--spacing-sm) var(--spacing-lg);
-  background: var(--color-glass-bg);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--color-glass-border);
-  border-radius: var(--radius-pill);
-  display: flex;
-  gap: var(--spacing-lg);
-  align-items: center;
-  transition: opacity var(--transition-slow), transform var(--transition-slow);
-}
-
-.instructions-panel.hidden {
-  opacity: 0;
-  transform: translateX(-50%) translateY(20px);
-  pointer-events: none;
-}
-
-.instruction-item {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  font-size: 0.72rem;
-  color: var(--color-text-muted);
-  white-space: nowrap;
-}
-
-.instruction-key {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px 8px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: var(--radius-sm);
-  font-size: 0.65rem;
-  font-weight: 600;
-  color: var(--color-text);
-  margin-right: 4px;
-}
-
-.instruction-separator {
-  width: 1px;
-  height: 16px;
-  background: var(--color-glass-border);
-}
-
 /* ========================================
-   Camera Mode Panel — top right
+   Actions / Abilities
    ======================================== */
 
-.camera-panel {
-  position: absolute;
-  top: var(--spacing-lg);
-  right: var(--spacing-lg);
-  padding: var(--spacing-md) var(--spacing-lg);
-  background: var(--color-glass-bg);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--color-glass-border);
-  border-radius: var(--radius-md);
-  pointer-events: auto;
+.actions-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-glass-border);
 }
 
-.camera-panel h3 {
+.actions-label {
   font-size: 0.6rem;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.15em;
+  letter-spacing: 0.12em;
   color: var(--color-text-muted);
-  margin-bottom: var(--spacing-sm);
+  margin-bottom: 6px;
 }
 
-.camera-buttons {
+.actions-list {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 4px;
 }
 
-.camera-btn {
+.action-chip {
+  display: inline-block;
+  padding: 3px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-pill);
+  font-size: 0.62rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  transition: all var(--transition-fast);
+}
+
+.action-chip.active {
+  background: rgba(125, 216, 125, 0.15);
+  border-color: rgba(125, 216, 125, 0.4);
+  color: var(--color-accent);
+  box-shadow: 0 0 8px rgba(125, 216, 125, 0.1);
+}
+
+/* ========================================
+   Camera Buttons — inline in settings
+   ======================================== */
+
+.camera-buttons-inline {
   display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  padding: 6px 10px;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.cam-chip {
+  padding: 4px 8px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--color-text-muted);
   font-family: inherit;
-  font-size: 0.72rem;
+  font-size: 0.62rem;
   cursor: pointer;
   transition: all var(--transition-fast);
 }
 
-.camera-btn:hover {
+.cam-chip:hover {
   background: rgba(255, 255, 255, 0.08);
   color: var(--color-text);
-  border-color: var(--color-glass-border);
 }
 
-.camera-btn.active {
+.cam-chip.active {
   background: rgba(125, 216, 125, 0.12);
   border-color: rgba(125, 216, 125, 0.3);
   color: var(--color-accent);
 }
 
-.camera-btn-icon {
-  font-size: 0.85rem;
+/* ========================================
+   Animal Selector — bottom-left
+   ======================================== */
+
+.animal-selector {
+  position: absolute;
+  bottom: var(--spacing-lg);
+  left: var(--spacing-lg);
+  padding: var(--spacing-sm) var(--spacing-md);
+}
+
+.animal-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.animal-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 2px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  min-width: 68px;
+}
+
+.animal-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--color-glass-border);
+  color: var(--color-text);
+}
+
+.animal-btn.selected {
+  background: rgba(125, 216, 125, 0.12);
+  border-color: rgba(125, 216, 125, 0.5);
+  color: var(--color-accent);
+}
+
+.animal-btn-emoji {
+  font-size: 1.4rem;
   line-height: 1;
 }
 
-.camera-btn-label {
+.animal-btn-name {
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.animal-btn-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  margin-top: 3px;
+}
+
+.mini-stat-track {
+  width: 100%;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.mini-stat-fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  transition: width 0.3s ease;
+}
+
+.animal-btn-behavior {
+  font-size: 0.52rem;
   font-weight: 500;
+  color: var(--color-text-muted);
+  text-transform: capitalize;
+  margin-top: 2px;
+}
+
+.animal-btn.selected .animal-btn-behavior {
+  color: var(--color-accent-warm);
+}
+
+/* ========================================
+   Flash Popup — center of screen
+   ======================================== */
+
+.flash-popup {
+  position: absolute;
+  top: 12%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 28px;
+  background: rgba(10, 15, 13, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(125, 216, 125, 0.4);
+  border-radius: var(--radius-pill);
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--color-accent);
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  animation: flashIn 0.3s ease-out, flashOut 0.5s ease-in 1.5s forwards;
+  box-shadow: 0 0 30px rgba(125, 216, 125, 0.15), 0 4px 20px rgba(0, 0, 0, 0.4);
+  z-index: 100;
+}
+
+@keyframes flashIn {
+  0% { opacity: 0; transform: translateX(-50%) translateY(-20px) scale(0.9); }
+  100% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+}
+
+@keyframes flashOut {
+  0% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
 }
 
 /* ========================================
@@ -341,33 +492,8 @@ canvas {
    ======================================== */
 
 @media (max-width: 640px) {
-  .stats-panel {
-    top: var(--spacing-md);
-    left: var(--spacing-md);
-    padding: var(--spacing-sm) var(--spacing-md);
-    min-width: 140px;
-  }
-
-  .camera-panel {
-    top: auto;
-    bottom: 70px;
-    right: var(--spacing-md);
-    padding: var(--spacing-sm) var(--spacing-md);
-  }
-
-  .camera-buttons {
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-
-  .instructions-panel {
-    bottom: var(--spacing-md);
-    gap: var(--spacing-md);
-    padding: var(--spacing-sm) var(--spacing-md);
-  }
-
-  .instruction-item {
-    font-size: 0.65rem;
-  }
+  .settings-panel { min-width: 200px; max-width: 240px; }
+  .animal-selector { bottom: var(--spacing-md); left: var(--spacing-md); }
+  .animal-buttons { flex-wrap: wrap; }
+  .flash-popup { font-size: 0.9rem; padding: 10px 20px; }
 }
-
