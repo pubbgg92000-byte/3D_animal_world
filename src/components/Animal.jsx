@@ -368,10 +368,11 @@ export default function Animal({
     movementSource.current = null;
   }, [animalAI, playIdle]);
 
-  useAnimalMovement(groupRef, activeDest, {
+  const { climbingRef, climbIntensity } = useAnimalMovement(groupRef, activeDest, {
     moveSpeed: () => movementSpeed.current,
     collisionRadius,
     streamSpeedMultiplier: isRabbit ? 1.12 : 0.68,
+    climbHeight: config.climbHeight || 0.3,
     selfId: config.id,
     onArrive: handleArrive,
     onStuck: handleStuck,
@@ -628,11 +629,14 @@ export default function Animal({
       setBoneRot(tailBone.current, 'z', Math.sin(phase * 0.5) * 0.08 * easeT);
     }
 
-    // Lower and softly lean the visible model while sleeping. The root stays
-    // terrain-locked, so waking never causes hovering or sinking.
+    // Lower and softly lean the visible model while sleeping or climbing.
+    // The root stays terrain-locked, so waking/stopping never causes hovering.
     if (presentationRef.current) {
       const targetLower = doSleep ? -SLEEP_BODY_LOWER : 0;
       const targetY = targetLower + leapOffset.current;
+
+      // Climbing tilt: lean forward slightly when stepping over rocks
+      const climbTilt = (climbIntensity?.current || 0) * 0.1; // forward lean
       const targetLean = doSleep ? 0.12 : doStreamLeap ? -0.16 : 0;
       const poseFactor = 1 - Math.exp(-2.4 * delta);
       presentationRef.current.position.y = THREE.MathUtils.lerp(
@@ -645,6 +649,20 @@ export default function Animal({
         targetLean,
         poseFactor
       );
+      // Apply forward tilt on X axis during climbing
+      presentationRef.current.rotation.x = THREE.MathUtils.lerp(
+        presentationRef.current.rotation.x || 0,
+        climbTilt,
+        poseFactor
+      );
+    }
+
+    // Head compensates for climb tilt — keeps head more level
+    if (headBone.current && !doGraze && !doDrink && !doSleep) {
+      const compensate = -(climbIntensity?.current || 0) * 0.08;
+      if (Math.abs(compensate) > 0.001) {
+        headBone.current.rotation.x += compensate;
+      }
     }
 
     // IDLE look-around — use setBoneRot (absolute) not additive to avoid drift
@@ -664,6 +682,13 @@ export default function Animal({
     }
   });
 
+  // Selection ring scale based on animal size
+  const ringScale = species === 'rabbit' ? 0.6
+                  : species === 'fox'    ? 0.8
+                  : species === 'deer'   ? 0.95
+                  : species === 'bear'   ? 1.2
+                  : 1.0;
+
   return (
     <group
       ref={groupRef}
@@ -672,15 +697,67 @@ export default function Animal({
       onPointerOver={() => { document.body.style.cursor = 'pointer'; }}
       onPointerOut={() => { document.body.style.cursor = 'default'; }}
     >
+      {/* ── Selection Ring — animated rotating ring with glow ── */}
       {isSelected && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.035, 0]}>
-          <ringGeometry args={[1.05, 1.22, 40]} />
-          <meshBasicMaterial color="#b9ff93" transparent opacity={0.72} depthWrite={false} />
-        </mesh>
+        <SelectionRing ringScale={ringScale} />
       )}
       <group ref={presentationRef}>
         <primitive object={clonedScene} scale={config.scale} />
       </group>
+    </group>
+  );
+}
+
+/* ── Animated Selection Ring ── */
+function SelectionRing({ ringScale = 1 }) {
+  const ringRef = useRef();
+  const glowRef = useRef();
+  const pulseRef = useRef(0);
+
+  useFrame((_, delta) => {
+    if (ringRef.current) {
+      // Slow rotation
+      ringRef.current.rotation.z += delta * 0.5;
+      // Gentle pulse
+      pulseRef.current += delta * 2.5;
+      const pulse = 1 + Math.sin(pulseRef.current) * 0.04;
+      ringRef.current.scale.setScalar(pulse);
+    }
+    if (glowRef.current) {
+      // Breathe opacity
+      const breathe = 0.2 + Math.sin(pulseRef.current * 0.8) * 0.1;
+      glowRef.current.material.opacity = breathe;
+    }
+  });
+
+  const inner = 1.05 * ringScale;
+  const outer = 1.2 * ringScale;
+  const glowOuter = 1.6 * ringScale;
+
+  return (
+    <group rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
+      {/* Outer glow disc */}
+      <mesh ref={glowRef}>
+        <ringGeometry args={[inner * 0.5, glowOuter, 48]} />
+        <meshBasicMaterial
+          color="#4ADE80"
+          transparent
+          opacity={0.15}
+          depthWrite={false}
+          side={2}
+        />
+      </mesh>
+      {/* Main ring */}
+      <mesh ref={ringRef}>
+        <ringGeometry args={[inner, outer, 48]} />
+        <meshBasicMaterial
+          color="#4ADE80"
+          transparent
+          opacity={0.65}
+          depthWrite={false}
+          side={2}
+        />
+      </mesh>
     </group>
   );
 }

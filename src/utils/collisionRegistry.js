@@ -8,8 +8,11 @@ import * as THREE from 'three';
  *
  * The movement hook reads both lists to push animals out of overlap.
  */
-// ── Static obstacles (tree trunks and large boulders) ────────────
+// ── Static obstacles (tree trunks, boulders, rocks) ──────────────
 // Decorative grass, flowers, reeds, and bushes are intentionally absent.
+// Each obstacle: { x, z, r, height }
+//   height = world-unit height of the obstacle top above ground
+//   Animals with climbHeight >= obstacle.height will step over it.
 export const TREE_OBSTACLES = [];
 const _staticGroups = new Map();
 
@@ -27,6 +30,7 @@ export function registerStaticObstacles(groupId, obstacles) {
       x: obstacle.x,
       z: obstacle.z,
       r: obstacle.r,
+      height: obstacle.height ?? 999, // default: unclearable (e.g. trees)
     }))
   );
   rebuildStaticObstacles();
@@ -45,8 +49,35 @@ export function registerTreeObstacles(trees) {
       x: tree.x,
       z: tree.z,
       r: 0.25 * tree.scale,
+      height: 999, // trees are never climbable
     }))
   );
+}
+
+/** Register rocks with realistic heights so animals can step over small ones. */
+export function registerRockObstacles(rocks) {
+  registerStaticObstacles(
+    'rocks',
+    rocks.map((rock) => ({
+      x: rock.x,
+      z: rock.z,
+      r: rock.r || 0.4,
+      height: rock.height || 0.3,
+    }))
+  );
+}
+
+/** Get the obstacle height at a position (returns 0 if no obstacle). */
+export function getObstacleHeight(x, z) {
+  let maxHeight = 0;
+  for (const ob of TREE_OBSTACLES) {
+    const dx = x - ob.x;
+    const dz = z - ob.z;
+    if (dx * dx + dz * dz < ob.r * ob.r) {
+      maxHeight = Math.max(maxHeight, ob.height);
+    }
+  }
+  return maxHeight;
 }
 
 // ── Dynamic obstacles (animals) ──────────────────────────────────

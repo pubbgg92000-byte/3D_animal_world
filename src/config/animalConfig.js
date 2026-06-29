@@ -48,6 +48,8 @@ export const ANIMALS = {
     furTint: '#d4b896',
     // Spawn position
     spawnPos: [-8, 0, 0],
+    // Max obstacle height this species can step over (world units)
+    climbHeight: 0.55,
     // Stats decay rates (per second)
     decayRates: { energy: 0.0025, hydration: 0.0035, hunger: 0.0030 },
   },
@@ -78,6 +80,7 @@ export const ANIMALS = {
     },
     furTint: '#c4975a',
     spawnPos: [14, 0, -8],
+    climbHeight: 0.45,
     decayRates: { energy: 0.0028, hydration: 0.0038, hunger: 0.0032 },
   },
 
@@ -107,6 +110,7 @@ export const ANIMALS = {
     },
     furTint: '#4a3520',
     spawnPos: [-18, 0, 15],
+    climbHeight: 0.60,
     decayRates: { energy: 0.0022, hydration: 0.0030, hunger: 0.0038 },
   },
 
@@ -136,6 +140,7 @@ export const ANIMALS = {
     },
     furTint: '#c4652a',
     spawnPos: [20, 0, 18],
+    climbHeight: 0.35,
     decayRates: { energy: 0.0032, hydration: 0.0034, hunger: 0.0040 },
   },
 
@@ -165,6 +170,7 @@ export const ANIMALS = {
     },
     furTint: '#a89070',
     spawnPos: [-10, 0, -15],
+    climbHeight: 0.15,
     decayRates: { energy: 0.0035, hydration: 0.0040, hunger: 0.0036 },
   },
 };
@@ -209,19 +215,60 @@ function randomSpawn(zone = 'all') {
   return [0, getTerrainHeight(0, -18), -18];
 }
 
+/**
+ * Personality metadata applied per-instance.
+ * Gives each animal a unique identity for the UI.
+ */
+function withPersonality(instance, meta) {
+  return { ...instance, ...meta };
+}
+
 /** Animated wildlife models. Each animal has its own movement and AI state. */
 export const ANIMAL_LIST = [
-  createInstance(ANIMALS.moose, 'moose', 'Moose', randomSpawn('meadow')),
-  createInstance(ANIMALS.deer, 'deer', 'Deer', randomSpawn('meadow')),
-  createInstance(ANIMALS.deer, 'deer-2', 'Deer 2', randomSpawn('meadow')),
-  createInstance(ANIMALS.deer, 'deer-3', 'Deer 3', randomSpawn('meadow')),
-  createInstance(ANIMALS.deer, 'deer-4', 'Deer 4', randomSpawn('meadow')),
-  createInstance(ANIMALS.bear, 'bear', 'Bear', randomSpawn('edge')),
-  createInstance(ANIMALS.fox, 'fox', 'Fox', randomSpawn('edge')),
-  createInstance(ANIMALS.rabbit, 'rabbit', 'Rabbit', randomSpawn()),
-  createInstance(ANIMALS.rabbit, 'rabbit-2', 'Rabbit 2', randomSpawn()),
-  createInstance(ANIMALS.rabbit, 'rabbit-3', 'Rabbit 3', randomSpawn()),
-  createInstance(ANIMALS.rabbit, 'rabbit-4', 'Rabbit 4', randomSpawn()),
+  withPersonality(
+    createInstance(ANIMALS.moose, 'moose', 'Moose', randomSpawn('meadow')),
+    { displayName: 'Magnus', gender: 'Male', age: '6 Years', weight: '520 kg', territory: 'Central Meadow' }
+  ),
+  withPersonality(
+    createInstance(ANIMALS.deer, 'deer', 'Deer', randomSpawn('meadow')),
+    { displayName: 'Fern', gender: 'Female', age: '3 Years', weight: '68 kg', territory: 'East Meadow' }
+  ),
+  withPersonality(
+    createInstance(ANIMALS.deer, 'deer-2', 'Deer 2', randomSpawn('meadow')),
+    { displayName: 'Birch', gender: 'Male', age: '4 Years', weight: '82 kg', territory: 'South Meadow' }
+  ),
+  withPersonality(
+    createInstance(ANIMALS.deer, 'deer-3', 'Deer 3', randomSpawn('meadow')),
+    { displayName: 'Willow', gender: 'Female', age: '2 Years', weight: '55 kg', territory: 'West Clearing' }
+  ),
+  withPersonality(
+    createInstance(ANIMALS.deer, 'deer-4', 'Deer 4', randomSpawn('meadow')),
+    { displayName: 'Clover', gender: 'Female', age: '1 Year', weight: '42 kg', territory: 'Pond Edge' }
+  ),
+  withPersonality(
+    createInstance(ANIMALS.bear, 'bear', 'Bear', randomSpawn('edge')),
+    { displayName: 'Bruno', gender: 'Male', age: '8 Years', weight: '340 kg', territory: 'North Forest' }
+  ),
+  withPersonality(
+    createInstance(ANIMALS.fox, 'fox', 'Fox', randomSpawn('edge')),
+    { displayName: 'Scout', gender: 'Male', age: '3 Years', weight: '7 kg', territory: 'Forest Edge' }
+  ),
+  withPersonality(
+    createInstance(ANIMALS.rabbit, 'rabbit', 'Rabbit', randomSpawn()),
+    { displayName: 'Hazel', gender: 'Female', age: '1 Year', weight: '2.1 kg', territory: 'Meadow Burrow' }
+  ),
+  withPersonality(
+    createInstance(ANIMALS.rabbit, 'rabbit-2', 'Rabbit 2', randomSpawn()),
+    { displayName: 'Pip', gender: 'Male', age: '8 Months', weight: '1.8 kg', territory: 'Stream Bank' }
+  ),
+  withPersonality(
+    createInstance(ANIMALS.rabbit, 'rabbit-3', 'Rabbit 3', randomSpawn()),
+    { displayName: 'Clementine', gender: 'Female', age: '1 Year', weight: '2.0 kg', territory: 'South Burrow' }
+  ),
+  withPersonality(
+    createInstance(ANIMALS.rabbit, 'rabbit-4', 'Rabbit 4', randomSpawn()),
+    { displayName: 'Thistle', gender: 'Male', age: '6 Months', weight: '1.5 kg', territory: 'Hill Burrow' }
+  ),
 ];
 
 /** Get config by ID */

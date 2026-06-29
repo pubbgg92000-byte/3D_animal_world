@@ -43,6 +43,8 @@ export default function Forest() {
           x: rock.x,
           z: rock.z,
           r: Math.max(0.25, asset.baseRadius * rock.scale * 0.82),
+          // Rock height from bounding box — drives climb-over vs steer-around
+          height: (asset.size?.y || 0.5) * rock.scale * 0.6,
         };
       })
     );

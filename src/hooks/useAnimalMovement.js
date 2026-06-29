@@ -26,6 +26,18 @@ function stableSign(value) {
   return hash % 2 === 0 ? 1 : -1;
 }
 
+/**
+ * useAnimalMovement — Height-aware movement with natural rock traversal.
+ *
+ * Animals evaluate obstacle height before deciding to steer:
+ *  - If obstacle.height <= climbHeight → walk directly over (isClimbing = true)
+ *  - If obstacle.height > climbHeight → steer around as before
+ *
+ * @param {React.RefObject} groupRef — ref to the animal's group object
+ * @param {THREE.Vector3|null} destination — target position
+ * @param {Object} options — movement configuration
+ * @param {number} options.climbHeight — max obstacle height this species can step over
+ */
 export default function useAnimalMovement(
   groupRef,
   destination,
@@ -36,6 +48,7 @@ export default function useAnimalMovement(
     turnThreshold = 0.62,
     collisionRadius = 0.8,
     streamSpeedMultiplier = 0.68,
+    climbHeight = 0.3,
     selfId = '',
     onArrive,
     onStuck,
@@ -52,6 +65,9 @@ export default function useAnimalMovement(
   const escapeTimer = useRef(0);
   const lastDistance = useRef(Infinity);
   const noProgressTimer = useRef(0);
+  // Climbing state — exposed for animation system
+  const climbingRef = useRef(false);
+  const climbIntensity = useRef(0); // 0–1, how steep the climb feels
 
   useFrame((_, delta) => {
     const object = groupRef.current;
@@ -76,6 +92,9 @@ export default function useAnimalMovement(
         noProgressTimer.current = 0;
         onArrive?.();
       }
+      // Fade out climbing when stopped
+      climbingRef.current = false;
+      climbIntensity.current *= Math.max(0, 1 - 4 * delta);
       return;
     }
 
@@ -86,6 +105,7 @@ export default function useAnimalMovement(
     const obstacles = TREE_OBSTACLES.concat(getAnimalObstacles(selfId, collisionRadius));
     let blockingObstacle = null;
     let bestScore = Infinity;
+    let isOnClimbableObstacle = false;
 
     for (const obstacle of obstacles) {
       const relativeX = obstacle.x - object.position.x;
@@ -98,11 +118,31 @@ export default function useAnimalMovement(
       const alreadyClose = directDistance < clearance + 0.35;
       if (!threatensPath && !alreadyClose) continue;
 
+      // ── Height-aware check: can this animal step over? ──
+      const obstacleHeight = obstacle.height ?? 999;
+      if (obstacleHeight <= climbHeight) {
+        // Animal CAN step over this obstacle — don't steer, mark as climbing
+        if (directDistance < clearance + 0.2) {
+          isOnClimbableObstacle = true;
+        }
+        continue; // Skip this obstacle entirely — don't avoid it
+      }
+
+      // Obstacle too tall — treat as blocking (original behavior)
       const score = Math.max(0, forward) + lateral * 0.3;
       if (score < bestScore) {
         bestScore = score;
         blockingObstacle = obstacle;
       }
+    }
+
+    // Update climbing state smoothly
+    if (isOnClimbableObstacle) {
+      climbingRef.current = true;
+      climbIntensity.current = Math.min(1, climbIntensity.current + 3 * delta);
+    } else {
+      climbingRef.current = false;
+      climbIntensity.current = Math.max(0, climbIntensity.current - 2 * delta);
     }
 
     _ahead.copy(object.position).addScaledVector(_desired, 2.5);
@@ -207,13 +247,22 @@ export default function useAnimalMovement(
 
     if (object.quaternion.angleTo(_correctedQuaternion) < turnThreshold || noProgressTimer.current > 0.9) {
       const baseSpeed = typeof moveSpeed === 'function' ? moveSpeed() : moveSpeed;
-      const speed = isStreamAt(object.position.x, object.position.z, 0.05)
+      let speed = isStreamAt(object.position.x, object.position.z, 0.05)
         ? baseSpeed * streamSpeedMultiplier
         : baseSpeed;
+
+      // Slow down 30% while climbing over obstacles
+      if (climbingRef.current) {
+        speed *= 0.7;
+      }
+
       object.position.addScaledVector(
         smoothDirection.current,
         Math.min(speed * delta, distance)
       );
     }
   });
+
+  // Return climbing state for animation system
+  return { climbingRef, climbIntensity };
 }

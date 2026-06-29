@@ -1,5 +1,5 @@
 import { Suspense, useState, useCallback, useRef, useEffect, Component } from 'react';
-import { Canvas } from '@react-three/fiber';
+import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
 // Config
@@ -13,11 +13,14 @@ import Sky from './components/Sky';
 import FloatingParticles from './components/FloatingParticles';
 import CameraController from './components/CameraController';
 import LoadingScreen from './components/LoadingScreen';
-import UIOverlay from './components/UIOverlay';
+import DestinationMarker from './components/DestinationMarker';
+import HUD from './components/ui/HUD';
 import AssetManager from './components/environment/AssetManager';
 import Forest from './components/environment/Forest/Forest';
 import Grass from './components/environment/Grass/Grass';
 import Terrain from './components/environment/Terrain/Terrain';
+
+import { playClick } from './hooks/useAudioFeedback';
 
 const CANVAS_DPR = [1, 1.35];
 const SHADOW_CONFIG = { type: THREE.PCFShadowMap };
@@ -71,10 +74,62 @@ class AnimalErrorBoundary extends Component {
 /* ========================================
    Lighting
    ======================================== */
-function SceneLighting() {
+function SceneLighting({ simMinutesRef }) {
+  const dirLightRef = useRef();
+  const ambientRef = useRef();
+  const hemiRef = useRef();
+
+  // Animate lighting based on time of day
+  useFrame(() => {
+    const m = simMinutesRef?.current ?? 540;
+    const hour = m / 60;
+    // Sun position: rises east, arcs overhead, sets west
+    const sunAngle = ((hour - 6) / 12) * Math.PI; // 0 at 6am, π at 6pm
+    const sunHeight = Math.sin(sunAngle);
+    const isDay = hour >= 5.5 && hour <= 20.5;
+
+    if (dirLightRef.current) {
+      // Sun position
+      const sx = Math.cos(sunAngle) * 55;
+      const sy = Math.max(5, sunHeight * 55);
+      const sz = -30;
+      dirLightRef.current.position.set(sx, sy, sz);
+
+      // Intensity: bright midday, dim at dawn/dusk, very dim at night
+      let intensity = 2.15;
+      if (hour < 6) intensity = 0.1;
+      else if (hour < 8) intensity = 0.4 + ((hour - 6) / 2) * 1.75;
+      else if (hour > 18) intensity = Math.max(0.1, 2.15 - ((hour - 18) / 2.5) * 2.05);
+      else if (hour > 20) intensity = 0.1;
+      dirLightRef.current.intensity = intensity;
+
+      // Color temperature: warm at dawn/dusk, neutral midday
+      let r = 1, g = 0.945, b = 0.81; // default warm white
+      if (hour >= 6 && hour < 8) {
+        const t = (hour - 6) / 2;
+        r = 1; g = 0.7 + t * 0.245; b = 0.45 + t * 0.36;
+      } else if (hour >= 17 && hour < 20) {
+        const t = (hour - 17) / 3;
+        r = 1; g = 0.945 - t * 0.25; b = 0.81 - t * 0.45;
+      } else if (hour >= 20 || hour < 6) {
+        r = 0.3; g = 0.35; b = 0.55;
+      }
+      dirLightRef.current.color.setRGB(r, g, b);
+    }
+
+    // Ambient: dimmer at night
+    if (ambientRef.current) {
+      ambientRef.current.intensity = isDay ? 0.48 : 0.12;
+    }
+    if (hemiRef.current) {
+      hemiRef.current.intensity = isDay ? 0.62 : 0.15;
+    }
+  });
+
   return (
     <>
       <directionalLight
+        ref={dirLightRef}
         position={[55, 55, -30]}
         intensity={2.15}
         color="#fff1cf"
@@ -87,11 +142,33 @@ function SceneLighting() {
         shadow-camera-bottom={-60}
         shadow-bias={-0.0005}
       />
-      <ambientLight intensity={0.48} color="#cfe7ff" />
-      <hemisphereLight skyColor="#8ed4ff" groundColor="#52752f" intensity={0.62} />
+      <ambientLight ref={ambientRef} intensity={0.48} color="#cfe7ff" />
+      <hemisphereLight ref={hemiRef} skyColor="#8ed4ff" groundColor="#52752f" intensity={0.62} />
     </>
   );
 }
+
+/* ========================================
+   Camera Position Reporter
+   ======================================== */
+function CameraPositionReporter({ onUpdate }) {
+  const { camera } = useThree();
+
+  // Report camera position every 500ms for minimap
+  useEffect(() => {
+    const interval = setInterval(() => {
+      onUpdate?.({ x: camera.position.x, y: camera.position.y, z: camera.position.z });
+    }, 500);
+    return () => clearInterval(interval);
+  }, [camera, onUpdate]);
+
+  return null;
+}
+
+/* ========================================
+   Arrival Detection threshold (world units)
+   ======================================== */
+const ARRIVAL_THRESHOLD = 2.5;
 
 /* ========================================
    App Component
@@ -103,10 +180,13 @@ export default function App() {
   // Selection
   const [selectedId, setSelectedId] = useState(getInitialSelectedAnimalId);
 
-  // Per-animal destinations (only selected animal gets one)
+  // Per-animal destinations
   const [destinations, setDestinations] = useState({});
   const [destinationSerials, setDestinationSerials] = useState({});
   const [runningFor, setRunningFor] = useState({});
+
+  // Active destination marker (only for selected animal)
+  const [activeMarker, setActiveMarker] = useState(null); // { position: THREE.Vector3, arrived: false }
 
   // Per-animal stats and behaviors
   const [allStats, setAllStats] = useState({});
@@ -115,8 +195,49 @@ export default function App() {
 
   // Camera
   const [cameraMode, setCameraMode] = useState('follow');
+  const [cameraPosition, setCameraPosition] = useState(null);
+  const [cameraSettings, setCameraSettings] = useState({
+    fov: 45,
+    smoothness: 0.5,
+    zoomSpeed: 1,
+  });
   const animalPositions = useRef({});
+  const [animalPositionsSnapshot, setAnimalPositionsSnapshot] = useState({});
 
+  // Simulation time ref — updated by HUD clock, read by Sky/Lighting per-frame
+  const simMinutesRef = useRef(540); // start at 09:00
+  const handleClockUpdate = useCallback((m) => {
+    simMinutesRef.current = m;
+  }, []);
+
+  // Periodically snapshot positions for minimap + arrival detection
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const snap = {};
+      for (const [id, pos] of Object.entries(animalPositions.current)) {
+        snap[id] = { x: pos.x, y: pos.y, z: pos.z };
+      }
+      setAnimalPositionsSnapshot(snap);
+
+      // Arrival detection for destination marker
+      if (activeMarker && !activeMarker.arrived && selectedId) {
+        const animalPos = animalPositions.current[selectedId];
+        if (animalPos) {
+          const dx = animalPos.x - activeMarker.position.x;
+          const dz = animalPos.z - activeMarker.position.z;
+          const dist = Math.sqrt(dx * dx + dz * dz);
+          if (dist < ARRIVAL_THRESHOLD) {
+            setActiveMarker((prev) => prev ? { ...prev, arrived: true } : null);
+            // Clear marker after dissolve animation
+            setTimeout(() => setActiveMarker(null), 1500);
+          }
+        }
+      }
+    }, 300);
+    return () => clearInterval(interval);
+  }, [activeMarker, selectedId]);
+
+  // Progressive asset streaming
   useEffect(() => {
     if (!entered) {
       setLoadStage(0);
@@ -136,9 +257,12 @@ export default function App() {
   const handleGroundClick = useCallback(
     (point) => {
       if (!selectedId) return;
+      playClick();
       setDestinations((prev) => ({ ...prev, [selectedId]: point }));
       setDestinationSerials((prev) => ({ ...prev, [selectedId]: (prev[selectedId] || 0) + 1 }));
       setRunningFor((prev) => ({ ...prev, [selectedId]: false }));
+      // Set marker
+      setActiveMarker({ position: point.clone(), arrived: false });
     },
     [selectedId]
   );
@@ -146,15 +270,20 @@ export default function App() {
   const handleGroundDoubleClick = useCallback(
     (point) => {
       if (!selectedId) return;
+      playClick();
       setDestinations((prev) => ({ ...prev, [selectedId]: point }));
       setDestinationSerials((prev) => ({ ...prev, [selectedId]: (prev[selectedId] || 0) + 1 }));
       setRunningFor((prev) => ({ ...prev, [selectedId]: true }));
+      // Set marker
+      setActiveMarker({ position: point.clone(), arrived: false });
     },
     [selectedId]
   );
 
   const handleSelectAnimal = useCallback((id) => {
     setSelectedId(id);
+    // Clear marker on animal change
+    setActiveMarker(null);
     try {
       window.localStorage.setItem(LAST_SELECTED_ANIMAL_KEY, id);
     } catch {
@@ -221,22 +350,32 @@ export default function App() {
         ? 'Idle'
         : 'Idle';
 
+  // Auto-enter handler (called by LoadingScreen at ~30%)
+  const handleAutoEnter = useCallback(() => {
+    setEntered(true);
+  }, []);
+
   return (
     <>
-      <LoadingScreen entered={entered} onEnter={() => setEntered(true)} />
+      <LoadingScreen entered={entered} onEnter={handleAutoEnter} />
 
-      {!entered ? null : (
+      {entered && (
       <>
 
-      <UIOverlay
+      <HUD
         selectedAnimalId={selectedId}
         animalConfigs={ANIMAL_LIST}
         animalStats={allStats}
         animalBehaviors={allBehaviors}
+        animalPositions={animalPositionsSnapshot}
         cameraMode={cameraMode}
+        cameraPosition={cameraPosition}
+        cameraSettings={cameraSettings}
         onCameraModeChange={setCameraMode}
+        onCameraSettingsChange={setCameraSettings}
         onSelectAnimal={handleSelectAnimal}
         onForceAbility={handleForceAbility}
+        onClockUpdate={handleClockUpdate}
       />
 
       <Canvas
@@ -245,8 +384,8 @@ export default function App() {
         gl={GL_CONFIG}
         camera={CAMERA_CONFIG}
       >
-        <SceneLighting />
-        <Sky />
+        <SceneLighting simMinutesRef={simMinutesRef} />
+        <Sky simMinutesRef={simMinutesRef} />
         <Terrain
           onClick={handleGroundClick}
           onDoubleClick={handleGroundDoubleClick}
@@ -273,7 +412,21 @@ export default function App() {
           targetPosition={cameraTarget}
           mode={cameraMode}
           mooseState={mooseState}
+          fov={cameraSettings.fov}
+          smoothness={cameraSettings.smoothness}
+          zoomSpeed={cameraSettings.zoomSpeed}
         />
+
+        <CameraPositionReporter onUpdate={setCameraPosition} />
+
+        {/* Destination marker with leaf particles */}
+        {activeMarker && (
+          <DestinationMarker
+            position={activeMarker.position}
+            arrived={activeMarker.arrived}
+            animalPosition={animalPositions.current[selectedId]}
+          />
+        )}
 
         {/* Spawn all animals */}
         {ANIMAL_LIST

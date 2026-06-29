@@ -10,7 +10,9 @@ import {
   STREAM_END_Z,
   streamCenterX,
   streamHalfWidth,
+  baseTerrainHeight,
 } from '../utils/world';
+import { registerStaticObstacles, unregisterStaticObstacles } from '../utils/collisionRegistry';
 
 /* ================================================================
    POND — full water level that overflows into a stream
@@ -162,8 +164,9 @@ const STREAM_VERT = /* glsl */`
 `;
 
 function StreamWater() {
-  // The stream starts at pond south edge (z=5+5.5=10.5) and flows to z=38
+  // The stream starts at pond south edge (z=5+5.5=10.5) and flows to z=55
   // We build a tapered ribbon in local coords, translated to world
+  // Each vertex Y follows terrain height so the stream hugs the ground
   const streamMat = useMemo(() => new THREE.ShaderMaterial({
     vertexShader:   STREAM_VERT,
     fragmentShader: STREAM_WATER_FRAG,
@@ -183,7 +186,7 @@ function StreamWater() {
     const startZ = STREAM_START_Z;
     const endZ = STREAM_END_Z;
     const length = endZ - startZ;
-    const segs   = 30;
+    const segs   = 40;
     const geo = new THREE.BufferGeometry();
     const verts = [];
     const uvs   = [];
@@ -193,10 +196,20 @@ function StreamWater() {
       const t = i / segs;
       const z = startZ + t * length;        // world z
       const w = streamHalfWidth(z) * 2;
-      const slight = streamCenterX(z);
+      const cx = streamCenterX(z);
 
-      verts.push(-w / 2 + slight, WATER_Y - 0.01, z);
-      verts.push( w / 2 + slight, WATER_Y - 0.01, z);
+      // Compute Y from terrain — the stream channel dip puts water
+      // at approximately -0.12 to -0.05 relative to the surrounding ground.
+      // We use the center terrain height which already has the channel carved.
+      const leftX = -w / 2 + cx;
+      const rightX = w / 2 + cx;
+      // Get the surrounding ground height (not the carved channel)
+      const groundY = baseTerrainHeight(cx, z);
+      // Water sits in the channel: slightly above the deepest carve
+      const waterY = groundY - 0.08;
+
+      verts.push(leftX,  waterY, z);
+      verts.push(rightX, waterY, z);
       uvs.push(0, t, 1, t);
     }
 
@@ -212,12 +225,12 @@ function StreamWater() {
     return geo;
   }, []);
 
-  // Stream bed / banks
+  // Stream bed / banks — sits below the water, also follows terrain
   const bedGeo = useMemo(() => {
     const startZ = STREAM_START_Z - 0.5;
     const endZ = STREAM_END_Z + 0.5;
     const length = endZ - startZ;
-    const segs   = 30;
+    const segs   = 40;
     const geo = new THREE.BufferGeometry();
     const verts = [];
     const uvs   = [];
@@ -226,10 +239,16 @@ function StreamWater() {
     for (let i = 0; i <= segs; i++) {
       const t = i / segs;
       const z = startZ + t * length;
-      const w = streamHalfWidth(z) * 2 + 0.8;
-      const slight = streamCenterX(z);
-      verts.push(-w / 2 + slight, WATER_Y - 0.04, z);
-      verts.push( w / 2 + slight, WATER_Y - 0.04, z);
+      const w = streamHalfWidth(Math.max(STREAM_START_Z, Math.min(STREAM_END_Z, z))) * 2 + 0.8;
+      const cx = streamCenterX(Math.max(STREAM_START_Z, Math.min(STREAM_END_Z, z)));
+      const leftX = -w / 2 + cx;
+      const rightX = w / 2 + cx;
+      // Bed sits below water surface
+      const groundY = baseTerrainHeight(cx, z);
+      const bedY = groundY - 0.14;
+
+      verts.push(leftX,  bedY, z);
+      verts.push(rightX, bedY, z);
       uvs.push(0, t, 1, t);
     }
     for (let i = 0; i < segs; i++) {
@@ -674,6 +693,23 @@ function RippleRing({ r, delay, speed, ox = 0, oz = 0 }) {
 export default function Pond() {
   const r = POND_RADIUS;
   const { x, y, z } = POND_POSITION;
+
+  // Register pond rim rocks as climbable obstacles with height data.
+  // Small rocks (sy < ~1.2) will be step-over-able by most species.
+  useEffect(() => {
+    const obstacles = RIM_ROCKS.map(([fraction, radiusFactor, sx, sy]) => {
+      const angle = fraction * Math.PI * 2;
+      const distance = r * radiusFactor;
+      return {
+        x: POND_X + Math.cos(angle) * distance,
+        z: POND_Z + Math.sin(angle) * distance,
+        r: Math.max(sx, sy) * 0.85 * 0.4, // collision radius
+        height: sy * 0.35, // actual visual height from RimRocks rendering
+      };
+    });
+    registerStaticObstacles('pond-rim-rocks', obstacles);
+    return () => unregisterStaticObstacles('pond-rim-rocks');
+  }, [r]);
 
   return (
     <group position={[x, y, z]}>

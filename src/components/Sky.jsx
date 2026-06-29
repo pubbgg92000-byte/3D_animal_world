@@ -1,24 +1,167 @@
-import { useRef } from 'react';
+import { useRef, useMemo } from 'react';
 import { Cloud } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
 /* ========================================
-   Constants — bright blue sky, midday feel
-   ======================================== */
-const FOG_COLOR = '#bfe5ff';
-const FOG_NEAR  = 90;
-const FOG_FAR   = 260;
+   Sky — Procedural time-of-day atmosphere
+   ========================================
 
-/* ========================================
-   Sky Component
+   Reads simMinutesRef (0–1440, minutes since midnight) per frame.
+   Smoothly interpolates between 7 time-of-day presets:
+     Dawn → Morning → Midday → Afternoon → Evening → Dusk → Night
+
+   Sun position, sky gradient, fog, and cloud tinting all respond to time.
    ======================================== */
-export default function Sky() {
-  const cloudGroupRef  = useRef();
+
+// ── Time-of-day presets (hour → colors) ──
+// Each preset: { hour, zenith: [r,g,b], horizon: [r,g,b], fog: [r,g,b], cloudTint: '#hex' }
+const PRESETS = [
+  { hour: 0,   zenith: [0.02, 0.02, 0.06], horizon: [0.05, 0.06, 0.12], fog: [0.04, 0.05, 0.10], cloudTint: '#1a1a2e' },
+  { hour: 5,   zenith: [0.04, 0.04, 0.10], horizon: [0.08, 0.08, 0.16], fog: [0.06, 0.06, 0.14], cloudTint: '#252540' },
+  { hour: 6,   zenith: [0.18, 0.18, 0.38], horizon: [0.92, 0.55, 0.32], fog: [0.82, 0.58, 0.42], cloudTint: '#ff9966' },
+  { hour: 7,   zenith: [0.22, 0.42, 0.72], horizon: [0.88, 0.72, 0.52], fog: [0.80, 0.72, 0.58], cloudTint: '#ffc080' },
+  { hour: 9,   zenith: [0.16, 0.56, 0.94], horizon: [0.72, 0.90, 1.00], fog: [0.75, 0.90, 1.00], cloudTint: '#ffffff' },
+  { hour: 12,  zenith: [0.14, 0.52, 0.92], horizon: [0.68, 0.88, 1.00], fog: [0.75, 0.90, 1.00], cloudTint: '#ffffff' },
+  { hour: 15,  zenith: [0.16, 0.54, 0.90], horizon: [0.70, 0.88, 0.98], fog: [0.74, 0.88, 0.98], cloudTint: '#fff8f0' },
+  { hour: 17,  zenith: [0.22, 0.38, 0.68], horizon: [0.95, 0.65, 0.35], fog: [0.85, 0.65, 0.42], cloudTint: '#ffaa66' },
+  { hour: 18.5,zenith: [0.12, 0.14, 0.35], horizon: [0.72, 0.28, 0.22], fog: [0.55, 0.28, 0.25], cloudTint: '#cc5533' },
+  { hour: 20,  zenith: [0.04, 0.04, 0.12], horizon: [0.10, 0.08, 0.18], fog: [0.08, 0.08, 0.14], cloudTint: '#222244' },
+  { hour: 24,  zenith: [0.02, 0.02, 0.06], horizon: [0.05, 0.06, 0.12], fog: [0.04, 0.05, 0.10], cloudTint: '#1a1a2e' },
+];
+
+function lerpArray(a, b, t) {
+  return a.map((v, i) => v + (b[i] - v) * t);
+}
+
+function getPresetAt(hour) {
+  // Wrap hour to 0-24
+  const h = ((hour % 24) + 24) % 24;
+  let lo = PRESETS[0], hi = PRESETS[1];
+  for (let i = 0; i < PRESETS.length - 1; i++) {
+    if (h >= PRESETS[i].hour && h < PRESETS[i + 1].hour) {
+      lo = PRESETS[i];
+      hi = PRESETS[i + 1];
+      break;
+    }
+  }
+  const t = (h - lo.hour) / (hi.hour - lo.hour || 1);
+  const smoothT = t * t * (3 - 2 * t); // smoothstep
+  return {
+    zenith: lerpArray(lo.zenith, hi.zenith, smoothT),
+    horizon: lerpArray(lo.horizon, hi.horizon, smoothT),
+    fog: lerpArray(lo.fog, hi.fog, smoothT),
+    cloudTint: lo.cloudTint, // snap — clouds lerp separately
+  };
+}
+
+// Shader uniforms
+const SKY_VERTEX = `
+  varying vec3 vDirection;
+  void main() {
+    vDirection = normalize(position);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const SKY_FRAGMENT = `
+  uniform vec3 uZenith;
+  uniform vec3 uHorizon;
+  uniform vec3 uSunDir;
+  uniform float uSunIntensity;
+  varying vec3 vDirection;
+
+  void main() {
+    float height = smoothstep(-0.08, 0.85, vDirection.y);
+    vec3 color = mix(uHorizon, uZenith, height);
+
+    // Sun glow
+    float sunDot = max(0.0, dot(normalize(vDirection), uSunDir));
+    float sunGlow = pow(sunDot, 64.0) * uSunIntensity * 1.2;
+    float sunHaze = pow(sunDot, 8.0) * uSunIntensity * 0.15;
+    color += vec3(1.0, 0.9, 0.7) * sunGlow;
+    color += vec3(1.0, 0.85, 0.6) * sunHaze;
+
+    // Stars at night (when zenith is very dark)
+    float darkness = 1.0 - smoothstep(0.0, 0.08, length(uZenith));
+    if (darkness > 0.1 && vDirection.y > 0.1) {
+      // Procedural star field
+      vec3 p = normalize(vDirection) * 500.0;
+      float n = fract(sin(dot(floor(p.xz * 0.5), vec2(127.1, 311.7))) * 43758.5453);
+      float star = step(0.992, n) * darkness * smoothstep(0.1, 0.4, vDirection.y);
+      float twinkle = 0.5 + 0.5 * sin(n * 6.28 + uSunIntensity * 10.0);
+      color += vec3(0.8, 0.85, 1.0) * star * twinkle;
+    }
+
+    gl_FragColor = vec4(color, 1.0);
+  }
+`;
+
+const _sunDir = new THREE.Vector3();
+const _fogColor = new THREE.Color();
+
+export default function Sky({ simMinutesRef }) {
+  const shaderRef = useRef();
+  const fogRef = useRef();
+  const cloudGroupRef = useRef();
   const cloudGroup2Ref = useRef();
 
-  useFrame(({ clock }) => {
+  // Shader uniforms
+  const uniforms = useMemo(
+    () => ({
+      uZenith: { value: new THREE.Vector3(0.16, 0.56, 0.94) },
+      uHorizon: { value: new THREE.Vector3(0.72, 0.90, 1.00) },
+      uSunDir: { value: new THREE.Vector3(0.5, 0.7, -0.5).normalize() },
+      uSunIntensity: { value: 1.0 },
+    }),
+    []
+  );
+
+  useFrame(({ scene, clock }) => {
     const t = clock.getElapsedTime();
+    const m = simMinutesRef?.current ?? 540;
+    const hour = m / 60;
+
+    // Get interpolated preset
+    const preset = getPresetAt(hour);
+
+    // Update sky shader
+    if (shaderRef.current) {
+      const u = shaderRef.current.uniforms;
+      u.uZenith.value.set(...preset.zenith);
+      u.uHorizon.value.set(...preset.horizon);
+
+      // Sun direction from hour
+      const sunAngle = ((hour - 6) / 12) * Math.PI;
+      const sunHeight = Math.sin(sunAngle);
+      const sunX = Math.cos(sunAngle);
+      _sunDir.set(sunX, Math.max(-0.2, sunHeight), -0.3).normalize();
+      u.uSunDir.value.copy(_sunDir);
+
+      // Sun intensity (0 at night, 1 midday)
+      const isDay = hour >= 5.5 && hour <= 20.5;
+      let intensity = 0;
+      if (hour >= 5.5 && hour < 7) intensity = (hour - 5.5) / 1.5;
+      else if (hour >= 7 && hour <= 18) intensity = 1;
+      else if (hour > 18 && hour <= 20.5) intensity = 1 - (hour - 18) / 2.5;
+      u.uSunIntensity.value = intensity;
+    }
+
+    // Update fog
+    if (scene.fog) {
+      _fogColor.setRGB(...preset.fog);
+      scene.fog.color.lerp(_fogColor, 0.05);
+      // Fog distance: closer at dawn/dusk for atmosphere
+      const isTransition = (hour >= 5.5 && hour < 8) || (hour >= 17 && hour < 20.5);
+      scene.fog.near = isTransition ? 60 : 90;
+      scene.fog.far = isTransition ? 180 : 260;
+    }
+
+    // Update background color
+    const bgColor = lerpArray(preset.horizon, preset.zenith, 0.3);
+    scene.background?.setRGB?.(...bgColor);
+
+    // Cloud drift
     if (cloudGroupRef.current) {
       cloudGroupRef.current.position.x = Math.sin(t * 0.012) * 6;
       cloudGroupRef.current.position.z = Math.cos(t * 0.009) * 4;
@@ -32,32 +175,19 @@ export default function Sky() {
   return (
     <>
       <color attach="background" args={['#59b9f3']} />
-      <fog attach="fog" args={[FOG_COLOR, FOG_NEAR, FOG_FAR]} />
+      <fog ref={fogRef} attach="fog" args={['#bfe5ff', 90, 260]} />
 
-      {/* Stable blue gradient unaffected by scene tone mapping/exposure. */}
+      {/* Procedural sky dome */}
       <mesh scale={230} renderOrder={-10}>
         <sphereGeometry args={[1, 32, 18]} />
         <shaderMaterial
+          ref={shaderRef}
           side={THREE.BackSide}
           depthWrite={false}
           toneMapped={false}
-          vertexShader={`
-            varying vec3 vDirection;
-            void main() {
-              vDirection = normalize(position);
-              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-            }
-          `}
-          fragmentShader={`
-            varying vec3 vDirection;
-            void main() {
-              float height = smoothstep(-0.08, 0.85, vDirection.y);
-              vec3 horizon = vec3(0.72, 0.90, 1.0);
-              vec3 zenith = vec3(0.16, 0.56, 0.94);
-              vec3 color = mix(horizon, zenith, height);
-              gl_FragColor = vec4(color, 1.0);
-            }
-          `}
+          vertexShader={SKY_VERTEX}
+          fragmentShader={SKY_FRAGMENT}
+          uniforms={uniforms}
         />
       </mesh>
 
