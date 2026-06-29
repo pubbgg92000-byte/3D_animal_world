@@ -17,6 +17,8 @@ const GRAZE_JAW_ANGLE = 0.2;
 const DRINK_NECK_ANGLE = 1.6;
 const SLEEP_BODY_LOWER = 0.32;
 const FUR_TEXTURES = new Map();
+const _boneEuler = new THREE.Euler();
+const _boneQuat = new THREE.Quaternion();
 
 function getFurDetailTexture(species) {
   if (FUR_TEXTURES.has(species)) return FUR_TEXTURES.get(species);
@@ -74,22 +76,6 @@ function findBone(root, pattern) {
 function smoothstep(t) {
   t = Math.max(0, Math.min(1, t));
   return t * t * (3 - 2 * t);
-}
-
-function applyBoneRot(bone, axis, angle) {
-  if (!bone) return;
-  const euler = new THREE.Euler();
-  euler[axis] = angle;
-  bone.quaternion.multiply(new THREE.Quaternion().setFromEuler(euler));
-}
-
-function applyNeckBend(bones, angle) {
-  const count = bones.length;
-  if (count === 0) return;
-  const share = 1.0 / count;
-  for (const b of bones) {
-    if (b) applyBoneRot(b, 'x', angle * share);
-  }
 }
 
 /* ========================================
@@ -237,6 +223,7 @@ export default function Animal({
   const jawBone = useRef(null);
   const tailBone = useRef(null);
   const spineBone = useRef(null);
+  const boneBaseQuats = useRef(new Map());
 
   // AI + Stats
   const animalAI = useAnimalAI(config.diet, config.species || config.id, config.id);
@@ -293,7 +280,29 @@ export default function Animal({
       if (b) { tailBone.current = b; break; }
     }
     spineBone.current = findBone(clonedScene, bc.spine);
+    boneBaseQuats.current.clear();
+    clonedScene.traverse((child) => {
+      if (child.isBone) boneBaseQuats.current.set(child.uuid, child.quaternion.clone());
+    });
   }, [clonedScene, config.bones]);
+
+  const setBoneRot = useCallback((bone, axis, angle) => {
+    if (!bone) return;
+    const base = boneBaseQuats.current.get(bone.uuid);
+    if (!base) return;
+    _boneEuler.set(0, 0, 0);
+    _boneEuler[axis] = angle;
+    _boneQuat.setFromEuler(_boneEuler);
+    bone.quaternion.copy(base).multiply(_boneQuat);
+  }, []);
+
+  const setNeckBend = useCallback((angle, multiplier = 1) => {
+    const bones = neckBones.current;
+    const count = bones.length;
+    if (count === 0) return;
+    const share = multiplier / count;
+    for (const bone of bones) setBoneRot(bone, 'x', angle * share);
+  }, [setBoneRot]);
 
   // Wait for actions + start idle
   useEffect(() => {
@@ -526,6 +535,11 @@ export default function Animal({
 
     // GRAZING — head all the way down
     if (doGraze) {
+      const species = config.species || config.id;
+      const huntPose = ai.shouldHunt;
+      const neckMultiplier = huntPose
+        ? species === 'bear' ? 0.34 : species === 'fox' ? 0.28 : 0.45
+        : 1;
       const cycle = 5.0;
       const t = (phase % cycle) / cycle;
       let neckAngle = 0;
@@ -536,20 +550,28 @@ export default function Animal({
       } else if (t < 0.75) {
         neckAngle = GRAZE_NECK_ANGLE;
         const chewT = (t - 0.2) / 0.55;
-        neckAngle += Math.sin(chewT * Math.PI * 8) * 0.06;
+        neckAngle += Math.sin(chewT * Math.PI * 8) * (huntPose ? 0.015 : 0.04);
         jawAngle = GRAZE_JAW_ANGLE * (0.5 + 0.5 * Math.sin(chewT * Math.PI * 10));
       } else {
         neckAngle = GRAZE_NECK_ANGLE * (1.0 - smoothstep((t - 0.75) / 0.25));
       }
 
-      applyNeckBend(neckBones.current, neckAngle);
-      applyBoneRot(headBone.current, 'x', neckAngle * 0.2);
-      applyBoneRot(jawBone.current, 'x', jawAngle);
-      applyBoneRot(tailBone.current, 'z', Math.sin(phase * 2.5) * 0.15);
+      setNeckBend(neckAngle, neckMultiplier);
+      setBoneRot(headBone.current, 'x', neckAngle * 0.12 * neckMultiplier);
+      setBoneRot(jawBone.current, 'x', jawAngle * (huntPose ? 0.35 : 1));
+      setBoneRot(tailBone.current, 'z', Math.sin(phase * 2.5) * 0.08);
     }
 
     // DRINKING
     if (doDrink) {
+      const species = config.species || config.id;
+      const drinkProfile = {
+        bear: { neck: 0.48, head: 0.08, jaw: 0.025, bob: 0.006 },
+        fox: { neck: 0.34, head: 0.05, jaw: 0.018, bob: 0.004 },
+        rabbit: { neck: 0.42, head: 0.06, jaw: 0.018, bob: 0.004 },
+        deer: { neck: 0.72, head: 0.12, jaw: 0.045, bob: 0.012 },
+        moose: { neck: 0.78, head: 0.14, jaw: 0.05, bob: 0.012 },
+      }[species] || { neck: 0.55, head: 0.09, jaw: 0.03, bob: 0.008 };
       const cycle = 4.0;
       const t = (phase % cycle) / cycle;
       let neckAngle = 0;
@@ -560,15 +582,15 @@ export default function Animal({
       } else if (t < 0.8) {
         neckAngle = DRINK_NECK_ANGLE;
         const drinkT = (t - 0.15) / 0.65;
-        jawAngle = 0.1 * Math.sin(drinkT * Math.PI * 12);
-        neckAngle += Math.sin(drinkT * Math.PI * 6) * 0.04;
+        jawAngle = drinkProfile.jaw * Math.sin(drinkT * Math.PI * 8);
+        neckAngle += Math.sin(drinkT * Math.PI * 4) * drinkProfile.bob;
       } else {
         neckAngle = DRINK_NECK_ANGLE * (1.0 - smoothstep((t - 0.8) / 0.2));
       }
 
-      applyNeckBend(neckBones.current, neckAngle);
-      applyBoneRot(headBone.current, 'x', neckAngle * 0.2);
-      applyBoneRot(jawBone.current, 'x', jawAngle);
+      setNeckBend(neckAngle, drinkProfile.neck);
+      setBoneRot(headBone.current, 'x', neckAngle * drinkProfile.head);
+      setBoneRot(jawBone.current, 'x', jawAngle);
     }
 
     // SLEEPING — sit on terrain, no floating
@@ -577,9 +599,9 @@ export default function Animal({
       const easeT = smoothstep(settleT);
       // Keep body ON the ground — never go below terrain
       pos.y = terrainY.current;
-      applyNeckBend(neckBones.current, 0.4 * easeT);
-      applyBoneRot(spineBone.current, 'x', Math.sin(phase * 0.8) * 0.025);
-      applyBoneRot(tailBone.current, 'z', Math.sin(phase * 0.5) * 0.1 * easeT);
+      setNeckBend(0.4 * easeT, 0.7);
+      setBoneRot(spineBone.current, 'x', Math.sin(phase * 0.8) * 0.018);
+      setBoneRot(tailBone.current, 'z', Math.sin(phase * 0.5) * 0.08 * easeT);
     }
 
     // Lower and softly lean the visible model while sleeping. The root stays
@@ -605,15 +627,15 @@ export default function Animal({
       const lt = (phase % 6.0) / 6.0;
       // Set head rotation absolutely so it doesn't accumulate frame-over-frame
       if (headBone.current) {
-        headBone.current.rotation.y = Math.sin(lt * Math.PI * 2) * 0.15;
+        setBoneRot(headBone.current, 'y', Math.sin(lt * Math.PI * 2) * 0.15);
       }
       if (tailBone.current) {
-        tailBone.current.rotation.z = Math.sin(phase * 1.8) * 0.12;
+        setBoneRot(tailBone.current, 'z', Math.sin(phase * 1.8) * 0.08);
       }
     } else if (doIdle) {
       // Reset head/tail when phase just started
-      if (headBone.current) headBone.current.rotation.y = 0;
-      if (tailBone.current) tailBone.current.rotation.z = 0;
+      setBoneRot(headBone.current, 'y', 0);
+      setBoneRot(tailBone.current, 'z', 0);
     }
   });
 

@@ -94,9 +94,18 @@ export function clampToWorld(point, padding = 1.5) {
 /** Dry stream-bank destinations animals can safely reach to drink. */
 export function createWaterApproachPoints() {
   const points = [];
-  for (const z of [17, 27, 38, 49]) {
+
+  for (let i = 0; i < 10; i++) {
+    const angle = (i / 10) * Math.PI * 2;
+    const distance = POND_RADIUS + 0.42;
+    const x = POND_X + Math.cos(angle) * distance;
+    const z = POND_Z + Math.sin(angle) * distance;
+    points.push(new THREE.Vector3(x, getTerrainHeight(x, z), z));
+  }
+
+  for (const z of [14, 22, 32, 44, 52]) {
     const center = streamCenterX(z);
-    const bank = streamHalfWidth(z) + 1.05;
+    const bank = streamHalfWidth(z) + 0.28;
     for (const side of [-1, 1]) {
       const x = center + side * bank;
       points.push(new THREE.Vector3(x, getTerrainHeight(x, z), z));

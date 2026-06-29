@@ -7,6 +7,7 @@ import { ANIMAL_LIST } from './config/animalConfig';
 
 // Components
 import Animal from './components/Animal';
+import Fish from './components/Fish';
 import Pond, { PondStream } from './components/Pond';
 import Sky from './components/Sky';
 import FloatingParticles from './components/FloatingParticles';
@@ -237,6 +238,7 @@ export default function App() {
           </Suspense>
         )}
         <Pond />
+        {loadStage >= 1 && <Fish />}
         <PondStream />
         <FloatingParticles />
 

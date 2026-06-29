@@ -2,13 +2,14 @@ import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { POND_POSITION, POND_RADIUS } from './Pond';
+import { POND_WATER_Y } from '../utils/world';
 
 /* ================================================================
    Fish — randomly roaming inside the central pond only
    (small pools removed)
    ================================================================ */
 
-const POND_FISH_COUNT = 10;
+const POND_FISH_COUNT = 22;
 
 // Seeded RNG so fish start positions are stable
 function seededRng(seed) {
@@ -27,8 +28,8 @@ function FishInstance({ centerX, centerZ, centerY, pondRadius, index, seed }) {
   const tailPhase = useRef(0);
 
   // Per-fish constants
-  const swimDepth = useMemo(() => -0.10 - (seed % 5) * 0.05, [seed]);
-  const speed     = useMemo(() => 0.8 + (seed % 7) * 0.18,   [seed]);
+  const swimDepth = useMemo(() => POND_WATER_Y - 0.10 - (seed % 4) * 0.035, [seed]);
+  const speed     = useMemo(() => 1.0 + (seed % 7) * 0.2,   [seed]);
   const color     = useMemo(() => FISH_COLORS[index % FISH_COLORS.length], [index]);
 
   // Pick initial random position inside pond
@@ -82,7 +83,7 @@ function FishInstance({ centerX, centerZ, centerY, pondRadius, index, seed }) {
     }
 
     // Gentle vertical bob
-    posRef.current.y = centerY + swimDepth + Math.sin(timerRef.current * 1.5 + index) * 0.03;
+      posRef.current.y = centerY + swimDepth + Math.sin(timerRef.current * 1.5 + index) * 0.035;
 
     // Apply to mesh
     meshRef.current.position.copy(posRef.current);
@@ -103,13 +104,13 @@ function FishInstance({ centerX, centerZ, centerY, pondRadius, index, seed }) {
     <group ref={meshRef}>
       {/* Body */}
       <mesh>
-        <capsuleGeometry args={[0.055, 0.18, 4, 8]} />
-        <meshStandardMaterial color={color} roughness={0.3} metalness={0.5} />
+        <capsuleGeometry args={[0.085, 0.28, 4, 10]} />
+        <meshStandardMaterial color={color} roughness={0.24} metalness={0.28} emissive={color} emissiveIntensity={0.08} />
       </mesh>
       {/* Tail */}
-      <mesh position={[-0.16, 0, 0]}>
-        <coneGeometry args={[0.06, 0.14, 3]} />
-        <meshStandardMaterial color={color} roughness={0.4} />
+      <mesh position={[-0.23, 0, 0]}>
+        <coneGeometry args={[0.085, 0.18, 3]} />
+        <meshStandardMaterial color={color} roughness={0.34} emissive={color} emissiveIntensity={0.06} />
       </mesh>
     </group>
   );
