@@ -33,6 +33,20 @@ const CAMERA_CONFIG = {
   far: 500,
   position: [8, 5, 10],
 };
+const LAST_SELECTED_ANIMAL_KEY = 'wild-trails:last-selected-animal';
+
+function getInitialSelectedAnimalId() {
+  if (typeof window === 'undefined') return ANIMAL_LIST[0]?.id || 'moose';
+  try {
+    const savedId = window.localStorage.getItem(LAST_SELECTED_ANIMAL_KEY);
+    if (savedId && ANIMAL_LIST.some((animal) => animal.id === savedId)) {
+      return savedId;
+    }
+  } catch {
+    // localStorage can be blocked in private/restricted browser contexts.
+  }
+  return ANIMAL_LIST[0]?.id || 'moose';
+}
 
 /* ========================================
    Error Boundary
@@ -87,7 +101,7 @@ export default function App() {
   const [loadStage, setLoadStage] = useState(0);
 
   // Selection
-  const [selectedId, setSelectedId] = useState('moose');
+  const [selectedId, setSelectedId] = useState(getInitialSelectedAnimalId);
 
   // Per-animal destinations (only selected animal gets one)
   const [destinations, setDestinations] = useState({});
@@ -141,6 +155,11 @@ export default function App() {
 
   const handleSelectAnimal = useCallback((id) => {
     setSelectedId(id);
+    try {
+      window.localStorage.setItem(LAST_SELECTED_ANIMAL_KEY, id);
+    } catch {
+      // Selection still works even if persistence is unavailable.
+    }
   }, []);
 
   const handlePositionUpdate = useCallback((id, pos) => {
