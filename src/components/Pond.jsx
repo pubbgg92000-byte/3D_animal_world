@@ -11,7 +11,6 @@ import {
   streamCenterX,
   streamHalfWidth,
 } from '../utils/world';
-import { registerStaticObstacles, unregisterStaticObstacles } from '../utils/collisionRegistry';
 
 /* ================================================================
    POND — full water level that overflows into a stream
@@ -147,8 +146,7 @@ const STREAM_WATER_FRAG = /* glsl */`
     float fresnel = pow(1.0 - max(dot(normalize(vec3(0.0,1.0,0.0)), V), 0.0), 2.0);
     vec3 col = mix(vec3(0.15, 0.50, 0.75), vec3(0.45, 0.78, 0.95), n);
     col = mix(col, vec3(0.6, 0.85, 1.0), fresnel * 0.4);
-    float alpha = 0.70 + fresnel * 0.15;
-    gl_FragColor = vec4(col, alpha);
+    gl_FragColor = vec4(col, 1.0);
   }
 `;
 
@@ -170,7 +168,7 @@ function StreamWater() {
     vertexShader:   STREAM_VERT,
     fragmentShader: STREAM_WATER_FRAG,
     uniforms: { uTime: { value: 0 }, uCam: { value: new THREE.Vector3() } },
-    transparent: true,
+    transparent: false,
     depthTest: true,
     depthWrite: true,
     side: THREE.DoubleSide,
@@ -252,9 +250,120 @@ function StreamWater() {
         <meshStandardMaterial color="#3a2a12" roughness={0.97} />
       </mesh>
       {/* Flowing water surface */}
-      <mesh geometry={streamGeo}>
+      <mesh geometry={streamGeo} renderOrder={0}>
         <primitive object={streamMat} attach="material" />
       </mesh>
+      <Waterfall />
+    </group>
+  );
+}
+
+const WATERFALL_VERT = /* glsl */`
+  varying vec2 vUv;
+  varying float vMist;
+  uniform float uTime;
+  void main(){
+    vUv = uv;
+    vec3 pos = position;
+    float fall = sin(uv.y * 34.0 - uTime * 6.5 + uv.x * 5.0) * 0.035;
+    fall += sin(uv.y * 17.0 - uTime * 4.0) * 0.025;
+    pos.x += fall;
+    vMist = smoothstep(0.72, 1.0, uv.y);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+  }
+`;
+
+const WATERFALL_FRAG = /* glsl */`
+  varying vec2 vUv;
+  varying float vMist;
+  uniform float uTime;
+  float stripe(float y, float speed, float scale){
+    return pow(0.5 + 0.5 * sin(y * scale - uTime * speed), 5.0);
+  }
+  void main(){
+    float flow = stripe(vUv.y, 12.0, 34.0) * 0.35 + stripe(vUv.y + vUv.x, 8.0, 18.0) * 0.22;
+    vec3 col = mix(vec3(0.20, 0.62, 0.86), vec3(0.86, 0.96, 1.0), flow + vMist * 0.75);
+    float edgeFade = smoothstep(0.0, 0.08, vUv.x) * (1.0 - smoothstep(0.92, 1.0, vUv.x));
+    float alpha = edgeFade * (0.62 + flow * 0.26 + vMist * 0.18);
+    gl_FragColor = vec4(col, alpha);
+  }
+`;
+
+function WaterfallMist({ position, scale = 1 }) {
+  const ref = useRef();
+  useFrame(({ clock }) => {
+    if (!ref.current) return;
+    const t = clock.elapsedTime;
+    ref.current.rotation.z = Math.sin(t * 1.7) * 0.08;
+    ref.current.scale.setScalar(scale * (0.92 + Math.sin(t * 2.2) * 0.08));
+    ref.current.material.opacity = 0.18 + Math.sin(t * 3.1) * 0.05;
+  });
+  return (
+    <mesh ref={ref} position={position} rotation={[-Math.PI / 2, 0, 0]}>
+      <circleGeometry args={[1, 28]} />
+      <meshBasicMaterial
+        color="#dff7ff"
+        transparent
+        opacity={0.2}
+        depthWrite={false}
+        side={THREE.DoubleSide}
+      />
+    </mesh>
+  );
+}
+
+function Waterfall() {
+  const mat = useMemo(() => new THREE.ShaderMaterial({
+    vertexShader: WATERFALL_VERT,
+    fragmentShader: WATERFALL_FRAG,
+    uniforms: { uTime: { value: 0 } },
+    transparent: true,
+    depthTest: true,
+    depthWrite: true,
+    side: THREE.DoubleSide,
+  }), []);
+
+  useFrame(({ clock }) => {
+    mat.uniforms.uTime.value = clock.elapsedTime;
+  });
+
+  const geometry = useMemo(() => {
+    const endZ = STREAM_END_Z;
+    const width = streamHalfWidth(endZ) * 2.4;
+    const topY = WATER_Y - 0.02;
+    const bottomY = WATER_Y - 2.45;
+    const x = streamCenterX(endZ);
+    const z = endZ + 0.16;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute([
+        x - width / 2, topY, z,
+        x + width / 2, topY, z,
+        x - width / 2, bottomY, z + 0.42,
+        x + width / 2, bottomY, z + 0.42,
+      ], 3)
+    );
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 1, 1], 2));
+    geo.setIndex([0, 2, 1, 1, 2, 3]);
+    geo.computeVertexNormals();
+    return geo;
+  }, []);
+
+  const endX = streamCenterX(STREAM_END_Z);
+  const bottomZ = STREAM_END_Z + 0.58;
+
+  return (
+    <group>
+      <mesh geometry={geometry} renderOrder={0}>
+        <primitive object={mat} attach="material" />
+      </mesh>
+      <mesh position={[endX, WATER_Y - 2.5, bottomZ]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.55, 1.25, 40]} />
+        <meshBasicMaterial color="#e8fbff" transparent opacity={0.42} depthWrite={false} side={THREE.DoubleSide} />
+      </mesh>
+      <WaterfallMist position={[endX - 0.28, WATER_Y - 2.47, bottomZ + 0.14]} scale={0.9} />
+      <WaterfallMist position={[endX + 0.38, WATER_Y - 2.44, bottomZ - 0.08]} scale={0.72} />
     </group>
   );
 }
@@ -565,22 +674,6 @@ function RippleRing({ r, delay, speed, ox = 0, oz = 0 }) {
 export default function Pond() {
   const r = POND_RADIUS;
   const { x, y, z } = POND_POSITION;
-
-  useEffect(() => {
-    registerStaticObstacles(
-      'pond-boulders',
-      RIM_ROCKS.map(([fraction, radiusFactor, sx, , sz]) => {
-        const angle = fraction * Math.PI * 2;
-        const distance = r * radiusFactor;
-        return {
-          x: x + Math.cos(angle) * distance,
-          z: z + Math.sin(angle) * distance,
-          r: Math.max(sx, sz) * 0.58,
-        };
-      })
-    );
-    return () => unregisterStaticObstacles('pond-boulders');
-  }, [r, x, z]);
 
   return (
     <group position={[x, y, z]}>

@@ -1,15 +1,18 @@
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
+import { useAnimations, useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { POND_POSITION, POND_RADIUS } from './Pond';
 import { POND_WATER_Y } from '../utils/world';
 
 /* ================================================================
-   Fish — randomly roaming inside the central pond only
-   (small pools removed)
+   Fish — animated GLB fish roaming inside the central pond only
    ================================================================ */
 
-const POND_FISH_COUNT = 22;
+const FISH_MODEL_URL = '/tropical_alien_fish_animated.glb';
+const POND_FISH_COUNT = 14;
+const FISH_MODEL_SCALE = 0.22;
 
 // Seeded RNG so fish start positions are stable
 function seededRng(seed) {
@@ -17,20 +20,52 @@ function seededRng(seed) {
   return () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
 }
 
-const FISH_COLORS = ['#c0392b', '#e67e22', '#95a5a6', '#2c3e50', '#f39c12', '#1abc9c', '#8e44ad'];
-
 function FishInstance({ centerX, centerZ, centerY, pondRadius, index, seed }) {
-  const meshRef   = useRef();
+  const groupRef  = useRef();
   const posRef    = useRef(new THREE.Vector3());
   const velRef    = useRef(new THREE.Vector3());
   const targetRef = useRef(new THREE.Vector3());
   const timerRef  = useRef(0);
-  const tailPhase = useRef(0);
+  const { scene, animations } = useGLTF(FISH_MODEL_URL);
+  const clonedScene = useMemo(() => {
+    const clone = SkeletonUtils.clone(scene);
+    clone.traverse((child) => {
+      if (!child.isMesh) return;
+      child.castShadow = true;
+      child.receiveShadow = false;
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of materials) {
+        if (!material) continue;
+        material.side = THREE.DoubleSide;
+        material.roughness = Math.min(0.82, material.roughness ?? 0.58);
+        material.metalness = Math.min(0.2, material.metalness ?? 0.05);
+        material.envMapIntensity = Math.max(material.envMapIntensity ?? 0, 0.22);
+        material.needsUpdate = true;
+      }
+    });
+    return clone;
+  }, [scene]);
+  const { actions } = useAnimations(animations, clonedScene);
 
   // Per-fish constants
-  const swimDepth = useMemo(() => POND_WATER_Y - 0.10 - (seed % 4) * 0.035, [seed]);
-  const speed     = useMemo(() => 1.0 + (seed % 7) * 0.2,   [seed]);
-  const color     = useMemo(() => FISH_COLORS[index % FISH_COLORS.length], [index]);
+  const swimDepth = useMemo(() => POND_WATER_Y - 0.34 - (seed % 4) * 0.045, [seed]);
+  const speed     = useMemo(() => 0.72 + (seed % 7) * 0.12, [seed]);
+  const modelScale = useMemo(() => FISH_MODEL_SCALE * (0.72 + (seed % 5) * 0.08), [seed]);
+  const modelTilt = useMemo(() => (index % 2 === 0 ? -0.05 : 0.04), [index]);
+
+  useEffect(() => {
+    const actionList = Object.values(actions).filter(Boolean);
+    for (const action of actionList) {
+      action.reset();
+      action.setLoop(THREE.LoopRepeat);
+      action.timeScale = 0.78 + (seed % 6) * 0.08;
+      action.play();
+      action.time = ((seed % 23) / 23) * Math.max(0.1, action.getClip().duration);
+    }
+    return () => {
+      for (const action of actionList) action.stop();
+    };
+  }, [actions, seed]);
 
   // Pick initial random position inside pond
   useMemo(() => {
@@ -47,7 +82,7 @@ function FishInstance({ centerX, centerZ, centerY, pondRadius, index, seed }) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useFrame((_, delta) => {
-    if (!meshRef.current) return;
+    if (!groupRef.current) return;
 
     timerRef.current -= delta;
 
@@ -85,33 +120,24 @@ function FishInstance({ centerX, centerZ, centerY, pondRadius, index, seed }) {
     // Gentle vertical bob
       posRef.current.y = centerY + swimDepth + Math.sin(timerRef.current * 1.5 + index) * 0.035;
 
-    // Apply to mesh
-    meshRef.current.position.copy(posRef.current);
+    // Apply to model
+    groupRef.current.position.copy(posRef.current);
 
     // Face movement direction
     if (velRef.current.lengthSq() > 0.0001) {
-      meshRef.current.rotation.y = Math.atan2(-velRef.current.z, velRef.current.x) + Math.PI * 0.5;
+      groupRef.current.rotation.y = Math.atan2(-velRef.current.z, velRef.current.x);
     }
-
-    // Tail wag — speed up when moving fast
-    tailPhase.current += delta * 8.0;
-    if (meshRef.current.children[1]) {
-      meshRef.current.children[1].rotation.z = Math.sin(tailPhase.current) * 0.35;
-    }
+    groupRef.current.rotation.x = modelTilt + Math.sin(timerRef.current * 2.1 + index) * 0.035;
   });
 
   return (
-    <group ref={meshRef}>
-      {/* Body */}
-      <mesh>
-        <capsuleGeometry args={[0.085, 0.28, 4, 10]} />
-        <meshStandardMaterial color={color} roughness={0.24} metalness={0.28} emissive={color} emissiveIntensity={0.08} />
-      </mesh>
-      {/* Tail */}
-      <mesh position={[-0.23, 0, 0]}>
-        <coneGeometry args={[0.085, 0.18, 3]} />
-        <meshStandardMaterial color={color} roughness={0.34} emissive={color} emissiveIntensity={0.06} />
-      </mesh>
+    <group ref={groupRef}>
+      <primitive
+        object={clonedScene}
+        scale={modelScale}
+        rotation={[0, Math.PI, 0]}
+        position={[0, -0.05, 0]}
+      />
     </group>
   );
 }
@@ -140,3 +166,5 @@ export default function Fish() {
     </group>
   );
 }
+
+useGLTF.preload(FISH_MODEL_URL);

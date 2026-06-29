@@ -11,6 +11,18 @@ export const POND_WATER_Y = 0.22;
 export const STREAM_START_Z = POND_Z + POND_RADIUS;
 export const STREAM_END_Z = 55;
 
+const POND_HUNT_ROCKS = [
+  [0.00, 1.01, 1.8, 1.2, 1.5],
+  [0.11, 1.04, 2.0, 1.4, 1.7],
+  [0.22, 1.06, 1.6, 1.1, 1.4],
+  [0.33, 1.03, 1.9, 1.3, 1.6],
+  [0.44, 1.07, 2.2, 1.5, 1.9],
+  [0.61, 1.05, 1.7, 1.15, 1.5],
+  [0.72, 1.03, 1.5, 1.05, 1.35],
+  [0.83, 1.06, 2.1, 1.4, 1.8],
+  [0.94, 1.04, 1.6, 1.1, 1.4],
+];
+
 export function baseTerrainHeight(x, z) {
   const h1 = Math.sin(x * 0.04) * Math.cos(z * 0.052);
   const h2 = Math.sin(x * 0.084 + 1.7) * Math.cos(z * 0.068 + 0.5);
@@ -112,6 +124,31 @@ export function createWaterApproachPoints() {
     }
   }
   return points;
+}
+
+export function createPondRockHuntPoints() {
+  return POND_HUNT_ROCKS.map(([fraction, radiusFactor]) => {
+    const angle = fraction * Math.PI * 2;
+    const distance = POND_RADIUS * radiusFactor;
+    const x = POND_X + Math.cos(angle) * distance;
+    const z = POND_Z + Math.sin(angle) * distance;
+    return new THREE.Vector3(x, getTerrainHeight(x, z), z);
+  });
+}
+
+export function getPondRockPerchOffset(x, z) {
+  let lift = 0;
+  for (const [fraction, radiusFactor, sx, sy, sz] of POND_HUNT_ROCKS) {
+    const angle = fraction * Math.PI * 2;
+    const cx = POND_X + Math.cos(angle) * POND_RADIUS * radiusFactor;
+    const cz = POND_Z + Math.sin(angle) * POND_RADIUS * radiusFactor;
+    const distance = Math.hypot(x - cx, z - cz);
+    const radius = Math.max(sx, sz) * 0.5;
+    if (distance > radius) continue;
+    const t = 1 - distance / Math.max(0.001, radius);
+    lift = Math.max(lift, (0.22 + sy * 0.32) * smoothstep(t));
+  }
+  return lift;
 }
 
 export function randomDryPoint(center, radius, attempts = 16) {

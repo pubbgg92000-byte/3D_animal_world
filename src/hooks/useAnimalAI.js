@@ -6,6 +6,7 @@ import { GRASS_POSITIONS } from '../components/TallGrass';
 import { getHerdCenter } from '../utils/collisionRegistry';
 import {
   WORLD_HALF,
+  createPondRockHuntPoints,
   createWaterApproachPoints,
   getTerrainHeight,
   randomDryPoint,
@@ -21,6 +22,7 @@ export const AI_STATE = {
 };
 
 const WATER_APPROACHES = createWaterApproachPoints();
+const POND_ROCK_HUNT_POINTS = createPondRockHuntPoints();
 const WORLD_CENTER = new THREE.Vector3(0, 0, 0);
 
 function nearestPoint(points, position, maxDistance = Infinity) {
@@ -61,6 +63,13 @@ function roamingPoint(position, herdCenter = null) {
     : randomDryPoint(position, 34);
 }
 
+function huntingPoint(position, species, fallback) {
+  if (species === 'bear' || species === 'fox') {
+    return nearestPoint(POND_ROCK_HUNT_POINTS, position)?.clone() || fallback;
+  }
+  return fallback;
+}
+
 export default function useAnimalAI(diet = DIET.HERBIVORE, species = null, animalId = null) {
   const state = useRef(AI_STATE.IDLE);
   const stateTimer = useRef(0);
@@ -93,7 +102,8 @@ export default function useAnimalAI(diet = DIET.HERBIVORE, species = null, anima
 
     if (urgentNeed === 'hunger') {
       if (diet === DIET.CARNIVORE) {
-        begin(AI_STATE.HUNT, nearestPoint(WATER_APPROACHES, position)?.clone() || chooseRoamingPoint(position), 14 + Math.random() * 8);
+        const fallback = nearestPoint(WATER_APPROACHES, position)?.clone() || chooseRoamingPoint(position);
+        begin(AI_STATE.HUNT, huntingPoint(position, species, fallback), 14 + Math.random() * 8);
       } else {
         begin(AI_STATE.GRAZE, grazingPoint(position), 16 + Math.random() * 10);
       }
@@ -112,7 +122,7 @@ export default function useAnimalAI(diet = DIET.HERBIVORE, species = null, anima
       begin(
         diet === DIET.CARNIVORE ? AI_STATE.HUNT : AI_STATE.GRAZE,
         diet === DIET.CARNIVORE
-          ? nearestPoint(WATER_APPROACHES, position)?.clone() || chooseRoamingPoint(position)
+          ? huntingPoint(position, species, nearestPoint(WATER_APPROACHES, position)?.clone() || chooseRoamingPoint(position))
           : grazingPoint(position),
         14 + Math.random() * 10
       );
@@ -121,7 +131,7 @@ export default function useAnimalAI(diet = DIET.HERBIVORE, species = null, anima
     } else {
       begin(AI_STATE.SLEEP, pointNearTree(position), 20 + Math.random() * 14);
     }
-  }, [begin, chooseRoamingPoint, diet]);
+  }, [begin, chooseRoamingPoint, diet, species]);
 
   const applyForcedBehavior = useCallback((behavior, position) => {
     const key = behavior.toLowerCase();
@@ -132,13 +142,14 @@ export default function useAnimalAI(diet = DIET.HERBIVORE, species = null, anima
     } else if (key === 'graze') {
       begin(AI_STATE.GRAZE, grazingPoint(position), 20);
     } else if (key.includes('hunt')) {
-      begin(AI_STATE.HUNT, nearestPoint(WATER_APPROACHES, position)?.clone() || chooseRoamingPoint(position), 20);
+      const fallback = nearestPoint(WATER_APPROACHES, position)?.clone() || chooseRoamingPoint(position);
+      begin(AI_STATE.HUNT, huntingPoint(position, species, fallback), 20);
     } else if (key === 'drink') {
       begin(AI_STATE.DRINK, nearestPoint(WATER_APPROACHES, position)?.clone() || null, 16);
     } else if (key === 'sleep') {
       begin(AI_STATE.SLEEP, pointNearTree(position), 30);
     }
-  }, [begin, chooseRoamingPoint]);
+  }, [begin, chooseRoamingPoint, species]);
 
   const update = useCallback((delta, position, urgentNeed, forcedBehavior = null) => {
     if (forcedBehavior && forcedBehavior !== lastForcedBehavior.current) {

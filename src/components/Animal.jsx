@@ -7,7 +7,7 @@ import useAnimalMovement from '../hooks/useAnimalMovement';
 import useAnimalAI from '../hooks/useAnimalAI';
 import useAnimalStats from '../hooks/useAnimalStats';
 import { registerAnimal, unregisterAnimal, resolveCollisions } from '../utils/collisionRegistry';
-import { WORLD_HALF, getTerrainHeight, isPondAt } from '../utils/world';
+import { WORLD_HALF, getPondRockPerchOffset, getTerrainHeight, isPondAt } from '../utils/world';
 
 /* ========================================
    Constants
@@ -445,7 +445,7 @@ export default function Animal({
       pos.z = lastSafePosition.current.z;
     }
 
-    const targetY = getTerrainHeight(pos.x, pos.z) - footSink;
+    const targetY = getTerrainHeight(pos.x, pos.z) - footSink + getPondRockPerchOffset(pos.x, pos.z);
     if (pos.y > targetY + 0.005) {
       verticalVelocity.current -= 20 * delta;
       pos.y = Math.max(targetY, pos.y + verticalVelocity.current * delta);
