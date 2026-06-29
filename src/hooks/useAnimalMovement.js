@@ -35,6 +35,7 @@ export default function useAnimalMovement(
     arrivalThreshold = 0.5,
     turnThreshold = 0.62,
     collisionRadius = 0.8,
+    streamSpeedMultiplier = 0.68,
     selfId = '',
     onArrive,
     onStuck,
@@ -207,7 +208,7 @@ export default function useAnimalMovement(
     if (object.quaternion.angleTo(_correctedQuaternion) < turnThreshold || noProgressTimer.current > 0.9) {
       const baseSpeed = typeof moveSpeed === 'function' ? moveSpeed() : moveSpeed;
       const speed = isStreamAt(object.position.x, object.position.z, 0.05)
-        ? baseSpeed * 0.68
+        ? baseSpeed * streamSpeedMultiplier
         : baseSpeed;
       object.position.addScaledVector(
         smoothDirection.current,

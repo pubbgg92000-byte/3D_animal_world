@@ -7,7 +7,7 @@ import useAnimalMovement from '../hooks/useAnimalMovement';
 import useAnimalAI from '../hooks/useAnimalAI';
 import useAnimalStats from '../hooks/useAnimalStats';
 import { registerAnimal, unregisterAnimal, resolveCollisions } from '../utils/collisionRegistry';
-import { WORLD_HALF, getPondRockPerchOffset, getTerrainHeight, isPondAt } from '../utils/world';
+import { WORLD_HALF, getPondRockPerchOffset, getTerrainHeight, isPondAt, isStreamAt } from '../utils/world';
 
 /* ========================================
    Constants
@@ -16,6 +16,7 @@ const GRAZE_NECK_ANGLE = 1.4;
 const GRAZE_JAW_ANGLE = 0.2;
 const DRINK_NECK_ANGLE = 1.6;
 const SLEEP_BODY_LOWER = 0.32;
+const RABBIT_STREAM_LEAP_HEIGHT = 0.72;
 const FUR_TEXTURES = new Map();
 const _boneEuler = new THREE.Euler();
 const _boneQuat = new THREE.Quaternion();
@@ -211,6 +212,8 @@ export default function Animal({
   const actionsReady = useRef(false);
   const terrainY = useRef(0);
   const behaviorPhase = useRef(0);
+  const leapPhase = useRef(0);
+  const leapOffset = useRef(0);
   const lastPosition = useRef(new THREE.Vector3());
   const lastSafePosition = useRef(new THREE.Vector3());
   const verticalVelocity = useRef(0);
@@ -234,7 +237,9 @@ export default function Animal({
   const movementSpeed = useRef(config.walkSpeed);
   const urgentNeed = useRef(null);
   const collisionRadius = config.collisionRadius || 0.8;
-  const footSink = (config.species || config.id) === 'rabbit' ? 0.018 : 0.04;
+  const species = config.species || config.id;
+  const isRabbit = species === 'rabbit';
+  const footSink = isRabbit ? 0.018 : 0.04;
 
   // User command tracking — use a serial number so every new click fires
   const prevSerial = useRef(0);
@@ -366,6 +371,7 @@ export default function Animal({
   useAnimalMovement(groupRef, activeDest, {
     moveSpeed: () => movementSpeed.current,
     collisionRadius,
+    streamSpeedMultiplier: isRabbit ? 1.12 : 0.68,
     selfId: config.id,
     onArrive: handleArrive,
     onStuck: handleStuck,
@@ -524,6 +530,24 @@ export default function Animal({
     const doDrink = ai.shouldDrink && !hasActiveMovement;
     const doSleep = ai.shouldSleep && !hasActiveMovement;
     const doIdle = !doGraze && !doDrink && !doSleep && idle;
+    const doStreamLeap = isRabbit && hasActiveMovement && isStreamAt(pos.x, pos.z, 0.9);
+
+    if (doStreamLeap) {
+      leapPhase.current += delta * 5.4;
+      const hop = Math.max(0, Math.sin(leapPhase.current));
+      leapOffset.current = THREE.MathUtils.lerp(
+        leapOffset.current,
+        hop * RABBIT_STREAM_LEAP_HEIGHT,
+        1 - Math.exp(-14 * delta)
+      );
+    } else {
+      leapPhase.current = 0;
+      leapOffset.current = THREE.MathUtils.lerp(
+        leapOffset.current,
+        0,
+        1 - Math.exp(-9 * delta)
+      );
+    }
 
     if (doGraze || doDrink || doSleep || doIdle) {
       behaviorPhase.current += delta;
@@ -608,11 +632,12 @@ export default function Animal({
     // terrain-locked, so waking never causes hovering or sinking.
     if (presentationRef.current) {
       const targetLower = doSleep ? -SLEEP_BODY_LOWER : 0;
-      const targetLean = doSleep ? 0.12 : 0;
+      const targetY = targetLower + leapOffset.current;
+      const targetLean = doSleep ? 0.12 : doStreamLeap ? -0.16 : 0;
       const poseFactor = 1 - Math.exp(-2.4 * delta);
       presentationRef.current.position.y = THREE.MathUtils.lerp(
         presentationRef.current.position.y,
-        targetLower,
+        targetY,
         poseFactor
       );
       presentationRef.current.rotation.z = THREE.MathUtils.lerp(
