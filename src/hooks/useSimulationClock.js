@@ -1,14 +1,17 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 /**
- * useSimulationClock — Simulated day/night cycle clock.
+ * useSimulationClock — Local day/night cycle clock.
  *
- * 1 real second ≈ 1 simulated minute.
- * Starts at 09:00 AM.
+ * Starts from the visitor's real local time so the sky/theme matches the day.
  */
 export default function useSimulationClock(speedMultiplier = 1) {
-  // Minutes since midnight (start at 09:00 = 540 minutes)
-  const [simMinutes, setSimMinutes] = useState(540);
+  const getLocalMinutes = () => {
+    const now = new Date();
+    return now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
+  };
+
+  const [simMinutes, setSimMinutes] = useState(getLocalMinutes);
   const lastTick = useRef(performance.now());
   const paused = useRef(false);
 
@@ -17,8 +20,7 @@ export default function useSimulationClock(speedMultiplier = 1) {
     const tick = (now) => {
       if (!paused.current) {
         const elapsed = (now - lastTick.current) / 1000; // real seconds
-        // 1 real second = 1 sim minute × speed
-        setSimMinutes((prev) => (prev + elapsed * speedMultiplier) % 1440);
+        setSimMinutes((prev) => (prev + (elapsed / 60) * speedMultiplier) % 1440);
       }
       lastTick.current = now;
       animId = requestAnimationFrame(tick);

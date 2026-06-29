@@ -67,14 +67,15 @@ export default function LoadingScreen({ entered = false, onEnter }) {
     return () => clearInterval(timer);
   }, []); // Run once on mount
 
-  // Dissolve: when entered AND progress is done
+  // Dissolve: once progress is done. Canvas entry usually happens at 30%,
+  // but this fail-safe prevents the loader from sticking on slower browsers.
   useEffect(() => {
-    if (entered && progress >= 98 && !dissolving) {
+    if (progress >= 98 && !dissolving) {
       setDissolving(true);
       const timer = setTimeout(() => setShow(false), 1400);
       return () => clearTimeout(timer);
     }
-  }, [entered, progress, dissolving]);
+  }, [progress, dissolving]);
 
   if (!show) return null;
 

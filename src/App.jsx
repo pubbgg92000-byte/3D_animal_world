@@ -44,6 +44,11 @@ const LAST_SELECTED_ANIMAL_KEY = 'wild-trails:last-selected-animal';
 const MINIMAL_MARKERS_KEY = 'wild-trails:minimal-destination-markers';
 const WATER_APPROACH_POINTS = createWaterApproachPoints();
 
+function getLocalMinutesSinceMidnight() {
+  const now = new Date();
+  return now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
+}
+
 const COMMANDS = {
   walk: {
     type: 'walk',
@@ -344,7 +349,7 @@ export default function App() {
   const [animalPositionsSnapshot, setAnimalPositionsSnapshot] = useState({});
 
   // Simulation time ref — updated by HUD clock, read by Sky/Lighting per-frame
-  const simMinutesRef = useRef(540); // start at 09:00
+  const simMinutesRef = useRef(getLocalMinutesSinceMidnight());
   const handleClockUpdate = useCallback((m) => {
     simMinutesRef.current = m;
   }, []);

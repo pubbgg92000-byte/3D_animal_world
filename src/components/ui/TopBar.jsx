@@ -17,7 +17,6 @@ export default function TopBar({
   extraButtons,
 }) {
   const [showHint, setShowHint] = useState(true);
-  const [localNow, setLocalNow] = useState(() => new Date());
   const climate = useLocalClimate();
 
   // Auto-fade tutorial hint after 5 seconds
@@ -25,16 +24,6 @@ export default function TopBar({
     const timer = setTimeout(() => setShowHint(false), 5000);
     return () => clearTimeout(timer);
   }, []);
-
-  useEffect(() => {
-    const timer = setInterval(() => setLocalNow(new Date()), 30 * 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const localTime = localNow.toLocaleTimeString([], {
-    hour: 'numeric',
-    minute: '2-digit',
-  });
 
   return (
     <div className="wt-topbar">
@@ -61,8 +50,6 @@ export default function TopBar({
           <span>{climate.location}</span>
           <span className="wt-topbar__separator">·</span>
           <span>{climate.timeZoneLabel}</span>
-          <span className="wt-topbar__separator">·</span>
-          <span>{localTime}</span>
         </div>
 
         {/* Tutorial hint — auto-fades */}
