@@ -6,7 +6,7 @@ export const WORLD_HALF = WORLD_SIZE / 2 - 2;
 export const POND_X = 0;
 export const POND_Z = 5;
 export const POND_RADIUS = 5.5;
-export const POND_WATER_Y = 0.05;
+export const POND_WATER_Y = 0.22;
 
 export const STREAM_START_Z = POND_Z + POND_RADIUS;
 export const STREAM_END_Z = 55;

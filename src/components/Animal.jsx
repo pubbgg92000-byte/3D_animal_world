@@ -341,11 +341,25 @@ export default function Animal({
     movementSource.current = null;
   }, [playIdle, animalAI]);
 
+  const handleStuck = useCallback(() => {
+    playIdle();
+    aiWalking.current = false;
+    lastAIDest.current = null;
+    setActiveDest(null);
+    if (movementSource.current === 'user') {
+      animalAI.clearOverride();
+    } else {
+      animalAI.repick?.();
+    }
+    movementSource.current = null;
+  }, [animalAI, playIdle]);
+
   useAnimalMovement(groupRef, activeDest, {
     moveSpeed: () => movementSpeed.current,
     collisionRadius,
     selfId: config.id,
     onArrive: handleArrive,
+    onStuck: handleStuck,
   });
 
   // User click → override AI and go to destination

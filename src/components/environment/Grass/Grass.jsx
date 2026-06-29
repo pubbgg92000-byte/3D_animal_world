@@ -15,9 +15,9 @@ import { createRandom, WORLD_SEED } from '../worldGenerator';
 
 const GRASS_MODEL_URL = '/grass.glb';
 const TALL_GRASS_MODEL_URL = '/animated_grass_-_vegetation.glb';
-const MEADOW_BATCH_COUNT = 16;
-const MAIN_GRASS_PATCH_COUNT = 1550;
-const TALL_GRASS_PATCH_COUNT = 150;
+const MEADOW_BATCH_COUNT = 14;
+const MAIN_GRASS_PATCH_COUNT = 2100;
+const TALL_GRASS_PATCH_COUNT = 240;
 const FLOWER_COUNT = 420;
 const FLOWER_COLORS = ['#f7e16b', '#f6a2bf', '#aeb8ff', '#ffffff', '#ef8c62'];
 const GRASS_COLORS = ['#356f32', '#43843a', '#559244', '#6a9d4a', '#3d7937'];
@@ -101,8 +101,8 @@ function createBatchCenters(random) {
     centers.push({
       x,
       z,
-      radius: 9 + random() * 9.5,
-      density: 0.86 + random() * 0.36,
+      radius: 11 + random() * 11,
+      density: 0.92 + random() * 0.34,
     });
   }
 
@@ -134,7 +134,7 @@ function makeGrassMatrices({ count, random, centers, baseScale, tall = false }) 
     if (isWaterAt(x, z, tall ? 2.2 : 1.45)) continue;
 
     // Feather only the outside edge; the interiors stay dense enough to read as one big batch.
-    if (edge > 0.82 && random() > (1 - edge) * 4.2 * center.density) continue;
+    if (edge > 0.88 && random() > (1 - edge) * 5.5 * center.density) continue;
 
     const terrainY = getTerrainHeight(x, z);
     const clumpScale = baseScale * (0.75 + random() * 0.65) * center.density;
@@ -183,13 +183,13 @@ export default function Grass() {
       count: MAIN_GRASS_PATCH_COUNT,
       random,
       centers,
-      baseScale: 0.071,
+      baseScale: 0.082,
     });
     const tallGrassMatrices = makeGrassMatrices({
       count: TALL_GRASS_PATCH_COUNT,
       random,
       centers,
-      baseScale: 0.016,
+      baseScale: 0.019,
       tall: true,
     });
 

@@ -147,6 +147,39 @@ canvas {
   letter-spacing: 0.1em;
 }
 
+.enter-button {
+  margin-top: var(--spacing-lg);
+  padding: 12px 22px;
+  border: 1px solid rgba(125, 216, 125, 0.55);
+  border-radius: var(--radius-pill);
+  background: linear-gradient(135deg, rgba(125, 216, 125, 0.22), rgba(244, 197, 66, 0.18));
+  color: #efffe9;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 0 26px rgba(125, 216, 125, 0.18);
+}
+
+.enter-button:hover,
+.enter-button:focus-visible {
+  outline: none;
+  transform: translateY(-1px);
+  border-color: rgba(190, 244, 174, 0.85);
+  box-shadow: 0 0 36px rgba(125, 216, 125, 0.28);
+}
+
+.loading-note {
+  max-width: min(340px, 78vw);
+  margin-top: var(--spacing-sm);
+  color: rgba(232, 237, 233, 0.48);
+  font-size: 0.68rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
 .loading-bar-container::after {
   content: '';
   position: absolute;
@@ -535,9 +568,32 @@ canvas {
    ======================================== */
 
 @media (max-width: 640px) {
-  .settings-panel { min-width: 200px; max-width: 240px; }
-  .animal-selector { bottom: var(--spacing-md); max-width: calc(100vw - 20px); }
-  .world-hint { top: 12px; max-width: calc(100vw - 90px); white-space: normal; }
+  .loading-title { font-size: 1.25rem; }
+  .loading-subtitle { font-size: 0.78rem; }
+  .enter-button { width: min(280px, 78vw); padding: 13px 18px; }
+  .settings-toggle { top: 12px; left: 12px; width: 34px; height: 34px; }
+  .settings-panel {
+    top: 54px;
+    left: 12px;
+    min-width: 0;
+    width: min(280px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
+    padding: 12px;
+  }
+  .stat-bar-label { min-width: 68px; font-size: 0.62rem; }
+  .animal-selector {
+    bottom: max(10px, env(safe-area-inset-bottom));
+    max-width: calc(100vw - 16px);
+    padding: 6px 8px;
+  }
+  .animal-btn {
+    min-width: 58px;
+    flex-basis: 62px;
+    padding: 7px 8px;
+  }
+  .animal-btn-emoji { font-size: 1.1rem; }
+  .animal-btn-name { font-size: 0.52rem; }
+  .world-hint { top: 12px; max-width: calc(100vw - 82px); white-space: normal; padding: 8px 14px; }
   .world-hint span { display: none; }
   .flash-popup { font-size: 0.9rem; padding: 10px 20px; }
 }

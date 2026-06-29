@@ -17,12 +17,14 @@ export default function Terrain({ onClick, onDoubleClick }) {
       const y = getTerrainHeight(x, z);
       positions.setY(index, y);
 
-      const meadow = Math.max(0, 1 - Math.hypot(x, z) / 42);
-      const variation = Math.sin(x * 0.19 + z * 0.13) * 0.035;
+      const meadow = Math.max(0, 1 - Math.hypot(x, z) / 46);
+      const fineGrass = Math.sin(x * 1.7) * Math.cos(z * 1.35) * 0.015;
+      const broadGrass = Math.sin(x * 0.19 + z * 0.13) * 0.035;
+      const variation = broadGrass + fineGrass;
       const color = new THREE.Color().setHSL(
-        0.29 + variation,
-        0.48 + meadow * 0.08,
-        0.25 + meadow * 0.055
+        0.305 + variation,
+        0.58 + meadow * 0.12,
+        0.31 + meadow * 0.075
       );
       colors.push(color.r, color.g, color.b);
     }

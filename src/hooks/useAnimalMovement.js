@@ -37,6 +37,7 @@ export default function useAnimalMovement(
     collisionRadius = 0.8,
     selfId = '',
     onArrive,
+    onStuck,
   } = {}
 ) {
   const hasArrived = useRef(false);
@@ -48,6 +49,8 @@ export default function useAnimalMovement(
   const progressAnchor = useRef(new THREE.Vector3());
   const progressTimer = useRef(0);
   const escapeTimer = useRef(0);
+  const lastDistance = useRef(Infinity);
+  const noProgressTimer = useRef(0);
 
   useFrame((_, delta) => {
     const object = groupRef.current;
@@ -58,6 +61,8 @@ export default function useAnimalMovement(
       progressAnchor.current.copy(object.position);
       progressTimer.current = 0;
       escapeTimer.current = 0;
+      lastDistance.current = Infinity;
+      noProgressTimer.current = 0;
       avoidanceKey.current = null;
     }
 
@@ -67,6 +72,7 @@ export default function useAnimalMovement(
       if (!hasArrived.current) {
         hasArrived.current = true;
         avoidanceKey.current = null;
+        noProgressTimer.current = 0;
         onArrive?.();
       }
       return;
@@ -117,7 +123,7 @@ export default function useAnimalMovement(
       avoidanceHold.current -= delta;
 
       _tangent.set(-_desired.z * avoidanceSide.current, 0, _desired.x * avoidanceSide.current);
-      _steer.copy(_desired).multiplyScalar(0.42).addScaledVector(_tangent, 1.25);
+      _steer.copy(_desired).multiplyScalar(0.72).addScaledVector(_tangent, 0.82);
 
       if (blockingObstacle) {
         _away
@@ -127,7 +133,7 @@ export default function useAnimalMovement(
             object.position.z - blockingObstacle.z
           )
           .normalize();
-        _steer.addScaledVector(_away, 1.15);
+        _steer.addScaledVector(_away, 0.95);
       }
 
       if (boundaryAhead) {
@@ -139,22 +145,48 @@ export default function useAnimalMovement(
       if (avoidanceHold.current === 0) avoidanceKey.current = null;
     }
 
+    if (distance < lastDistance.current - 0.03) {
+      lastDistance.current = distance;
+      noProgressTimer.current = 0;
+    } else {
+      noProgressTimer.current += delta;
+    }
+
     // Detect lack of forward progress and commit to one escape arc long enough
     // to leave dense obstacle clusters instead of alternating left/right.
     progressTimer.current += delta;
     if (object.position.distanceToSquared(progressAnchor.current) > 0.36) {
       progressAnchor.current.copy(object.position);
       progressTimer.current = 0;
-    } else if (progressTimer.current > 1.4 && escapeTimer.current <= 0) {
-      escapeTimer.current = 1.35;
+    } else if ((progressTimer.current > 1.2 || noProgressTimer.current > 1.6) && escapeTimer.current <= 0) {
+      escapeTimer.current = 1.0;
       progressTimer.current = 0;
       avoidanceSide.current = stableSign(`${selfId}:${Math.round(object.position.x)}:${Math.round(object.position.z)}`);
+    }
+
+    if (noProgressTimer.current > 2.8) {
+      // Close enough but orbiting around the target/obstacle: finish the move
+      // instead of endlessly circling. Farther away: reset to direct steering.
+      if (distance < Math.max(arrivalThreshold * 3.2, 1.7)) {
+        hasArrived.current = true;
+        noProgressTimer.current = 0;
+        avoidanceKey.current = null;
+        onArrive?.();
+        return;
+      }
+      onStuck?.();
+      smoothDirection.current.copy(_desired);
+      avoidanceKey.current = null;
+      avoidanceHold.current = 0;
+      noProgressTimer.current = 0;
+      lastDistance.current = Infinity;
+      return;
     }
 
     if (escapeTimer.current > 0) {
       escapeTimer.current -= delta;
       _tangent.set(-_desired.z * avoidanceSide.current, 0, _desired.x * avoidanceSide.current);
-      _steer.addScaledVector(_tangent, 1.65);
+      _steer.addScaledVector(_tangent, 1.05).addScaledVector(_desired, 0.6);
     }
 
     if (_steer.lengthSq() < 0.001) _steer.copy(_desired);
@@ -172,7 +204,7 @@ export default function useAnimalMovement(
     const rotationFactor = 1 - Math.exp(-rotationSpeed * delta);
     object.quaternion.slerp(_correctedQuaternion, rotationFactor);
 
-    if (object.quaternion.angleTo(_correctedQuaternion) < turnThreshold) {
+    if (object.quaternion.angleTo(_correctedQuaternion) < turnThreshold || noProgressTimer.current > 0.9) {
       const baseSpeed = typeof moveSpeed === 'function' ? moveSpeed() : moveSpeed;
       const speed = isStreamAt(object.position.x, object.position.z, 0.05)
         ? baseSpeed * 0.68

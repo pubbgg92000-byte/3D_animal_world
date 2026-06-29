@@ -1,4 +1,4 @@
-import { Suspense, useState, useCallback, useRef, Component } from 'react';
+import { Suspense, useState, useCallback, useRef, useEffect, Component } from 'react';
 import { Canvas } from '@react-three/fiber';
 import * as THREE from 'three';
 
@@ -82,6 +82,9 @@ function SceneLighting() {
    App Component
    ======================================== */
 export default function App() {
+  const [entered, setEntered] = useState(false);
+  const [loadStage, setLoadStage] = useState(0);
+
   // Selection
   const [selectedId, setSelectedId] = useState('moose');
 
@@ -98,6 +101,20 @@ export default function App() {
   // Camera
   const [cameraMode, setCameraMode] = useState('follow');
   const animalPositions = useRef({});
+
+  useEffect(() => {
+    if (!entered) {
+      setLoadStage(0);
+      return undefined;
+    }
+
+    const timers = [
+      setTimeout(() => setLoadStage(1), 220),   // grass starts after first frame
+      setTimeout(() => setLoadStage(2), 850),   // forest follows
+      setTimeout(() => setLoadStage(3), 1500),  // remaining animals stream in
+    ];
+    return () => timers.forEach(clearTimeout);
+  }, [entered]);
 
   // ---------- Handlers ----------
 
@@ -186,7 +203,10 @@ export default function App() {
 
   return (
     <>
-      <LoadingScreen />
+      <LoadingScreen entered={entered} onEnter={() => setEntered(true)} />
+
+      {!entered ? null : (
+      <>
 
       <UIOverlay
         selectedAnimalId={selectedId}
@@ -211,18 +231,22 @@ export default function App() {
           onClick={handleGroundClick}
           onDoubleClick={handleGroundDoubleClick}
         />
-        <Suspense fallback={null}>
-          <Grass />
-        </Suspense>
+        {loadStage >= 1 && (
+          <Suspense fallback={null}>
+            <Grass />
+          </Suspense>
+        )}
         <Pond />
         <PondStream />
         <FloatingParticles />
 
-        <Suspense fallback={null}>
-          <AssetManager>
-            <Forest />
-          </AssetManager>
-        </Suspense>
+        {loadStage >= 2 && (
+          <Suspense fallback={null}>
+            <AssetManager>
+              <Forest />
+            </AssetManager>
+          </Suspense>
+        )}
 
         <CameraController
           targetPosition={cameraTarget}
@@ -231,7 +255,9 @@ export default function App() {
         />
 
         {/* Spawn all animals */}
-        {ANIMAL_LIST.map((cfg) => (
+        {ANIMAL_LIST
+          .filter((cfg) => loadStage >= 3 || cfg.id === selectedId)
+          .map((cfg) => (
           <AnimalErrorBoundary key={cfg.id} animalId={cfg.id}>
             <Suspense fallback={null}>
               <Animal
@@ -250,6 +276,8 @@ export default function App() {
           </AnimalErrorBoundary>
         ))}
       </Canvas>
+      </>
+      )}
     </>
   );
 }

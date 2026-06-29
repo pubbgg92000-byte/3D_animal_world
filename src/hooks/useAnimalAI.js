@@ -213,11 +213,19 @@ export default function useAnimalAI(diet = DIET.HERBIVORE, species = null, anima
     stateTimer.current = 0;
   }, []);
 
+  const repick = useCallback(() => {
+    arrived.current = true;
+    destination.current = null;
+    state.current = AI_STATE.IDLE;
+    stateTimer.current = stateDuration.current;
+  }, []);
+
   return {
     update,
     override,
     clearOverride,
     arrive,
+    repick,
     getState: () => state.current,
   };
 }

@@ -21,7 +21,7 @@ import { registerStaticObstacles, unregisterStaticObstacles } from '../utils/col
 export const POND_POSITION = new THREE.Vector3(POND_X, 0, POND_Z);
 export const POND_RADIUS = WORLD_POND_RADIUS;
 
-// Water is now FULL — sits right at terrain rim level
+// Water is full and visibly close to the rim.
 const WATER_Y  = POND_WATER_Y;
 const BED_Y    = -1.45;   // pond floor depth
 
@@ -107,7 +107,8 @@ function WaterSurface({ radius }) {
       uCam:  { value: new THREE.Vector3() },
     },
     transparent: true,
-    depthWrite:  false,
+    depthTest: true,
+    depthWrite: true,
     side: THREE.DoubleSide,
   }), []);
   useFrame(({ clock, camera }) => {
@@ -115,7 +116,7 @@ function WaterSurface({ radius }) {
     mat.uniforms.uCam.value.copy(camera.position);
   });
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, WATER_Y, 0]} renderOrder={2}>
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, WATER_Y, 0]} renderOrder={0}>
       <circleGeometry args={[radius, 80]} />
       <primitive object={mat} attach="material" />
     </mesh>
@@ -378,8 +379,8 @@ function LilyPads({ radius }) {
     }
     return arr;
   }, [radius, rng]);
-  const padMat = useMemo(() => new THREE.MeshStandardMaterial({ color:'#1e5e20', roughness:0.7, side:THREE.DoubleSide }), []);
-  const fMat   = useMemo(() => new THREE.MeshStandardMaterial({ color:'#f0dded', roughness:0.6 }), []);
+  const padMat = useMemo(() => new THREE.MeshStandardMaterial({ color:'#226f24', roughness:0.78, side:THREE.DoubleSide }), []);
+  const fMat   = useMemo(() => new THREE.MeshStandardMaterial({ color:'#f6c8ea', roughness:0.62, side: THREE.DoubleSide }), []);
   const fcMat  = useMemo(() => new THREE.MeshStandardMaterial({ color:'#f5c842', roughness:0.5 }), []);
   return (
     <group>
@@ -387,17 +388,17 @@ function LilyPads({ radius }) {
         <group key={p.key} position={[p.px, WATER_Y+0.03, p.pz]}>
           <mesh rotation={[-Math.PI/2,0,p.rot]} scale={p.scale}>
             <circleGeometry args={[1,20,p.notch,Math.PI*2-p.notch*1.3]} />
-            <primitive object={padMat} />
+            <primitive object={padMat} attach="material" />
           </mesh>
           {p.hasFlower && (
             <group position={[0,0.06,0]} scale={p.scale*0.38}>
               <mesh rotation={[-Math.PI/2,0,0]}>
                 <circleGeometry args={[0.85,8]} />
-                <primitive object={fMat} />
+                <primitive object={fMat} attach="material" />
               </mesh>
               <mesh position={[0,0.06,0]}>
                 <sphereGeometry args={[0.24,6,6]} />
-                <primitive object={fcMat} />
+                <primitive object={fcMat} attach="material" />
               </mesh>
             </group>
           )}
@@ -407,15 +408,86 @@ function LilyPads({ radius }) {
   );
 }
 
+function createSwayMaterial(color, strength = 0.16) {
+  const material = new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.84,
+    side: THREE.DoubleSide,
+  });
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = { value: 0 };
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <common>',
+      '#include <common>\nuniform float uTime;'
+    );
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+       float phase = instanceMatrix[3][0] * 0.47 + instanceMatrix[3][2] * 0.31;
+       float tip = smoothstep(0.0, 1.0, position.y);
+       transformed.x += sin(uTime * 1.55 + phase + position.y * 0.7) * tip * ${strength.toFixed(3)};
+       transformed.z += cos(uTime * 1.25 + phase + position.x * 0.5) * tip * ${(strength * 0.55).toFixed(3)};`
+    );
+    material.userData.shader = shader;
+  };
+  return material;
+}
+
+function setInstancedMatrices(mesh, matrices) {
+  if (!mesh) return;
+  matrices.forEach((matrix, index) => mesh.setMatrixAt(index, matrix));
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.computeBoundingBox();
+  mesh.computeBoundingSphere();
+}
+
+function PoolLongGrass({ radius }) {
+  const bladeRef = useRef();
+  const bladeMat = useMemo(() => createSwayMaterial('#4f8d2e', 0.20), []);
+  const bladeGeo = useMemo(() => new THREE.PlaneGeometry(0.11, 1.0, 1, 4).translate(0, 0.5, 0), []);
+  const matrices = useMemo(() => {
+    const rng = seededRng(141);
+    const dummy = new THREE.Object3D();
+    const arr = [];
+    for (let cluster = 0; cluster < 54; cluster++) {
+      const baseA = (cluster / 54) * Math.PI * 2 + (rng() - 0.5) * 0.16;
+      const baseR = radius * (1.03 + rng() * 0.32);
+      const count = 6 + Math.floor(rng() * 9);
+      for (let i = 0; i < count; i++) {
+        const a = baseA + (rng() - 0.5) * 0.42;
+        const r = baseR + (rng() - 0.5) * 1.05;
+        const h = 0.95 + rng() * 1.25;
+        dummy.position.set(Math.cos(a) * r, -0.03, Math.sin(a) * r);
+        dummy.rotation.set((rng() - 0.5) * 0.18, a + Math.PI / 2 + (rng() - 0.5) * 0.8, (rng() - 0.5) * 0.22);
+        dummy.scale.set(0.8 + rng() * 0.8, h, 0.8 + rng() * 0.45);
+        dummy.updateMatrix();
+        arr.push(dummy.matrix.clone());
+      }
+    }
+    return arr;
+  }, [radius]);
+
+  useEffect(() => setInstancedMatrices(bladeRef.current, matrices), [matrices]);
+  useFrame(({ clock }) => {
+    const shader = bladeMat.userData?.shader;
+    if (shader) shader.uniforms.uTime.value = clock.elapsedTime;
+  });
+
+  return (
+    <instancedMesh ref={bladeRef} args={[bladeGeo, bladeMat, matrices.length]} receiveShadow>
+    </instancedMesh>
+  );
+}
+
 function Reeds({ radius }) {
   const rng = useMemo(() => seededRng(31), []);
   const stalks = useMemo(() => {
     const arr = [];
-    for (let c = 0; c < 12; c++) {
-      const baseA = (c/12)*Math.PI*2+c*0.4, clR = radius*1.1+rng()*0.5, count = 2+Math.floor(rng()*5);
+    for (let c = 0; c < 24; c++) {
+      const baseA = (c/24)*Math.PI*2+c*0.23, clR = radius*(1.05+rng()*0.24), count = 3+Math.floor(rng()*7);
       for (let j = 0; j < count; j++) {
-        const a = baseA+(j-count/2)*0.18+rng()*0.08, r = clR+(rng()-0.5)*0.4;
-        arr.push({ key:`${c}-${j}`, px:Math.cos(a)*r, pz:Math.sin(a)*r, h:0.7+rng()*0.9, tilt:(rng()-0.5)*0.2, isCattail:rng()>0.45 });
+        const a = baseA+(j-count/2)*0.12+rng()*0.12, r = clR+(rng()-0.5)*0.65;
+        arr.push({ key:`${c}-${j}`, px:Math.cos(a)*r, pz:Math.sin(a)*r, h:0.95+rng()*1.25, tilt:(rng()-0.5)*0.24, isCattail:rng()>0.38 });
       }
     }
     return arr;
@@ -431,17 +503,17 @@ function Reeds({ radius }) {
             <>
               <mesh position={[0,s.h*0.5,0]} castShadow>
                 <cylinderGeometry args={[0.022,0.030,s.h,4]} />
-                <primitive object={stemMat} />
+                <primitive object={stemMat} attach="material" />
               </mesh>
               <mesh position={[0,s.h+0.11,0]}>
                 <cylinderGeometry args={[0.042,0.042,0.24,6]} />
-                <primitive object={cattailMat} />
+                <primitive object={cattailMat} attach="material" />
               </mesh>
             </>
           ) : (
             <mesh position={[0,s.h*0.5,0]} rotation={[0,s.tilt*5,s.tilt*0.4]}>
               <planeGeometry args={[0.07,s.h]} />
-              <primitive object={bladeMat} />
+              <primitive object={bladeMat} attach="material" />
             </mesh>
           )}
         </group>
@@ -480,7 +552,7 @@ function RippleRing({ r, delay, speed, ox = 0, oz = 0 }) {
     ref.current.material.opacity = (1 - t) * 0.28;
   });
   return (
-    <mesh ref={ref} rotation={[-Math.PI/2,0,0]} position={[ox, WATER_Y+0.01, oz]}>
+    <mesh ref={ref} rotation={[-Math.PI/2,0,0]} position={[ox, WATER_Y+0.01, oz]} renderOrder={0}>
       <ringGeometry args={[r*0.88, r*0.94, 40]} />
       <meshBasicMaterial color="#c8e8f8" transparent opacity={0.25} side={THREE.DoubleSide} />
     </mesh>
@@ -524,6 +596,7 @@ export default function Pond() {
         <RippleRing key={i} r={r * rf} delay={delay} speed={speed} ox={ox} oz={oz} />
       ))}
 
+      <PoolLongGrass radius={r} />
       <Reeds radius={r} />
 
       {/* Overflow stream — rendered in world space so no group offset needed */}
