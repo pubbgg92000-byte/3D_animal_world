@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
+import useLocalClimate from '../../hooks/useLocalClimate';
 
 /**
  * TopBar — Minimal, cinematic.
@@ -8,8 +9,6 @@ import { useState, useEffect, useRef } from 'react';
  * Auto-fading tutorial hint.
  */
 
-const WEATHER_STATES = ['☀️', '⛅', '🌤️'];
-
 export default function TopBar({
   time = '09:00 AM',
   timeOfDay = 'Morning',
@@ -18,6 +17,8 @@ export default function TopBar({
   extraButtons,
 }) {
   const [showHint, setShowHint] = useState(true);
+  const [localNow, setLocalNow] = useState(() => new Date());
+  const climate = useLocalClimate();
 
   // Auto-fade tutorial hint after 5 seconds
   useEffect(() => {
@@ -25,8 +26,15 @@ export default function TopBar({
     return () => clearTimeout(timer);
   }, []);
 
-  // Decorative weather
-  const weatherIcon = WEATHER_STATES[Math.floor(Date.now() / 120000) % WEATHER_STATES.length];
+  useEffect(() => {
+    const timer = setInterval(() => setLocalNow(new Date()), 30 * 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const localTime = localNow.toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 
   return (
     <div className="wt-topbar">
@@ -36,13 +44,25 @@ export default function TopBar({
       {/* ── Center: Time · Weather · Season ── */}
       <div className="wt-topbar__center">
         <div className="wt-topbar__time-weather">
-          <span className="wt-topbar__time">{time}</span>
+          <span className="wt-topbar__time" title={`Wildlife clock: ${timeOfDay}`}>{time}</span>
           <span className="wt-topbar__separator">·</span>
-          <span className="wt-topbar__weather">{weatherIcon}</span>
+          <span className="wt-topbar__weather">{climate.icon}</span>
+          {climate.temperature && (
+            <>
+              <span className="wt-topbar__temp">{climate.temperature}</span>
+              <span className="wt-topbar__separator">·</span>
+            </>
+          )}
+          <span className="wt-topbar__climate">{climate.label}</span>
           <span className="wt-topbar__separator">·</span>
-          <span className="wt-topbar__temp">23°</span>
+          <span className="wt-topbar__season">{climate.season}</span>
+        </div>
+        <div className="wt-topbar__local-context" title={climate.timeZone}>
+          <span>{climate.location}</span>
           <span className="wt-topbar__separator">·</span>
-          <span className="wt-topbar__season">Spring</span>
+          <span>{climate.timeZoneLabel}</span>
+          <span className="wt-topbar__separator">·</span>
+          <span>{localTime}</span>
         </div>
 
         {/* Tutorial hint — auto-fades */}

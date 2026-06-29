@@ -1,5 +1,6 @@
 import { useEffect, useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
+import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import {
   POND_X,
@@ -8,9 +9,10 @@ import {
   POND_WATER_Y,
   STREAM_START_Z,
   STREAM_END_Z,
+  getStreamWaterHeight,
   streamCenterX,
   streamHalfWidth,
-  baseTerrainHeight,
+  getTerrainHeight,
 } from '../utils/world';
 import { registerStaticObstacles, unregisterStaticObstacles } from '../utils/collisionRegistry';
 
@@ -25,6 +27,7 @@ export const POND_RADIUS = WORLD_POND_RADIUS;
 // Water is full and visibly close to the rim.
 const WATER_Y  = POND_WATER_Y;
 const BED_Y    = -1.45;   // pond floor depth
+const STREAM_GRASS_MODEL_URL = '/grass.glb';
 
 // Stream end — where animals drink (edge of 80×80 world, z-positive side)
 export const STREAM_END = new THREE.Vector3(
@@ -148,7 +151,8 @@ const STREAM_WATER_FRAG = /* glsl */`
     float fresnel = pow(1.0 - max(dot(normalize(vec3(0.0,1.0,0.0)), V), 0.0), 2.0);
     vec3 col = mix(vec3(0.15, 0.50, 0.75), vec3(0.45, 0.78, 0.95), n);
     col = mix(col, vec3(0.6, 0.85, 1.0), fresnel * 0.4);
-    gl_FragColor = vec4(col, 1.0);
+    float alpha = mix(0.52, 0.78, fresnel + n * 0.18);
+    gl_FragColor = vec4(col, alpha);
   }
 `;
 
@@ -171,9 +175,9 @@ function StreamWater() {
     vertexShader:   STREAM_VERT,
     fragmentShader: STREAM_WATER_FRAG,
     uniforms: { uTime: { value: 0 }, uCam: { value: new THREE.Vector3() } },
-    transparent: false,
+    transparent: true,
     depthTest: true,
-    depthWrite: true,
+    depthWrite: false,
     side: THREE.DoubleSide,
   }), []);
 
@@ -183,10 +187,10 @@ function StreamWater() {
   });
 
   const streamGeo = useMemo(() => {
-    const startZ = STREAM_START_Z;
+    const startZ = STREAM_START_Z - 0.62;
     const endZ = STREAM_END_Z;
     const length = endZ - startZ;
-    const segs   = 40;
+    const segs   = 48;
     const geo = new THREE.BufferGeometry();
     const verts = [];
     const uvs   = [];
@@ -195,18 +199,14 @@ function StreamWater() {
     for (let i = 0; i <= segs; i++) {
       const t = i / segs;
       const z = startZ + t * length;        // world z
-      const w = streamHalfWidth(z) * 2;
-      const cx = streamCenterX(z);
+      const streamZ = THREE.MathUtils.clamp(z, STREAM_START_Z, STREAM_END_Z);
+      const mouthT = THREE.MathUtils.clamp((z - startZ) / (STREAM_START_Z - startZ), 0, 1);
+      const w = (streamHalfWidth(streamZ) + THREE.MathUtils.lerp(0.42, -0.08, mouthT)) * 2;
+      const cx = streamCenterX(streamZ);
 
-      // Compute Y from terrain — the stream channel dip puts water
-      // at approximately -0.12 to -0.05 relative to the surrounding ground.
-      // We use the center terrain height which already has the channel carved.
       const leftX = -w / 2 + cx;
       const rightX = w / 2 + cx;
-      // Get the surrounding ground height (not the carved channel)
-      const groundY = baseTerrainHeight(cx, z);
-      // Water sits in the channel: slightly above the deepest carve
-      const waterY = groundY - 0.08;
+      const waterY = getStreamWaterHeight(streamZ) + 0.018;
 
       verts.push(leftX,  waterY, z);
       verts.push(rightX, waterY, z);
@@ -225,12 +225,12 @@ function StreamWater() {
     return geo;
   }, []);
 
-  // Stream bed / banks — sits below the water, also follows terrain
+  // Stream bed — sits just below the raised water surface.
   const bedGeo = useMemo(() => {
-    const startZ = STREAM_START_Z - 0.5;
+    const startZ = STREAM_START_Z - 0.7;
     const endZ = STREAM_END_Z + 0.5;
     const length = endZ - startZ;
-    const segs   = 40;
+    const segs   = 48;
     const geo = new THREE.BufferGeometry();
     const verts = [];
     const uvs   = [];
@@ -239,13 +239,13 @@ function StreamWater() {
     for (let i = 0; i <= segs; i++) {
       const t = i / segs;
       const z = startZ + t * length;
-      const w = streamHalfWidth(Math.max(STREAM_START_Z, Math.min(STREAM_END_Z, z))) * 2 + 0.8;
-      const cx = streamCenterX(Math.max(STREAM_START_Z, Math.min(STREAM_END_Z, z)));
+      const streamZ = THREE.MathUtils.clamp(z, STREAM_START_Z, STREAM_END_Z);
+      const mouthT = THREE.MathUtils.clamp((z - startZ) / (STREAM_START_Z - startZ), 0, 1);
+      const w = (streamHalfWidth(streamZ) + THREE.MathUtils.lerp(0.95, 0.55, mouthT)) * 2 + 0.85;
+      const cx = streamCenterX(streamZ);
       const leftX = -w / 2 + cx;
       const rightX = w / 2 + cx;
-      // Bed sits below water surface
-      const groundY = baseTerrainHeight(cx, z);
-      const bedY = groundY - 0.14;
+      const bedY = getStreamWaterHeight(streamZ) - 0.26;
 
       verts.push(leftX,  bedY, z);
       verts.push(rightX, bedY, z);
@@ -266,13 +266,215 @@ function StreamWater() {
     <group>
       {/* Muddy stream bed */}
       <mesh geometry={bedGeo}>
-        <meshStandardMaterial color="#3a2a12" roughness={0.97} />
+        <meshStandardMaterial color="#756d57" roughness={0.98} />
       </mesh>
+      <StreamBedPebbles />
       {/* Flowing water surface */}
       <mesh geometry={streamGeo} renderOrder={0}>
         <primitive object={streamMat} attach="material" />
       </mesh>
+      <StreamGravelBanks />
+      <StreamBankGrass />
       <Waterfall />
+    </group>
+  );
+}
+
+function StreamBedPebbles() {
+  const pebbleRef = useRef();
+  const matrices = useMemo(() => {
+    const rng = seededRng(247);
+    const dummy = new THREE.Object3D();
+    const arr = [];
+    for (let i = 0; i < 210; i++) {
+      const z = STREAM_START_Z - 0.35 + rng() * (STREAM_END_Z - STREAM_START_Z + 0.35);
+      const streamZ = THREE.MathUtils.clamp(z, STREAM_START_Z, STREAM_END_Z);
+      const half = streamHalfWidth(streamZ) * (0.25 + rng() * 0.58);
+      const side = rng() > 0.5 ? 1 : -1;
+      const x = streamCenterX(streamZ) + side * half;
+      const size = 0.035 + rng() * 0.1;
+      dummy.position.set(
+        x,
+        getStreamWaterHeight(streamZ) - 0.245 + size * 0.12,
+        z
+      );
+      dummy.rotation.set(rng() * 0.2, rng() * Math.PI, rng() * 0.18);
+      dummy.scale.set(size * (1.1 + rng()), size * 0.26, size * (0.8 + rng() * 0.8));
+      dummy.updateMatrix();
+      arr.push(dummy.matrix.clone());
+    }
+    return arr;
+  }, []);
+
+  useEffect(() => setInstancedMatrices(pebbleRef.current, matrices), [matrices]);
+
+  return (
+    <instancedMesh ref={pebbleRef} args={[null, null, matrices.length]} receiveShadow>
+      <dodecahedronGeometry args={[0.5, 0]} />
+      <meshStandardMaterial color="#8f8a78" roughness={0.94} />
+    </instancedMesh>
+  );
+}
+
+function createBankRibbonGeometry(side, innerOffset, outerOffset, yOffset, segs = 56) {
+  const startZ = STREAM_START_Z - 0.62;
+  const endZ = STREAM_END_Z;
+  const length = endZ - startZ;
+  const geo = new THREE.BufferGeometry();
+  const verts = [];
+  const uvs = [];
+  const idx = [];
+
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs;
+    const z = startZ + t * length;
+    const streamZ = THREE.MathUtils.clamp(z, STREAM_START_Z, STREAM_END_Z);
+    const mouthT = THREE.MathUtils.clamp((z - startZ) / (STREAM_START_Z - startZ), 0, 1);
+    const cx = streamCenterX(streamZ);
+    const half = streamHalfWidth(streamZ) + THREE.MathUtils.lerp(0.55, 0, mouthT);
+    const innerX = cx + side * (half + innerOffset);
+    const outerX = cx + side * (half + outerOffset);
+    verts.push(innerX, getTerrainHeight(innerX, z) + yOffset, z);
+    verts.push(outerX, getTerrainHeight(outerX, z) + yOffset, z);
+    uvs.push(0, t * 10, 1, t * 10);
+  }
+
+  for (let i = 0; i < segs; i++) {
+    const a = i * 2;
+    idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+  }
+
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function StreamGravelBanks() {
+  const material = useMemo(() => new THREE.MeshStandardMaterial({
+    color: '#b8a982',
+    roughness: 0.98,
+    metalness: 0,
+  }), []);
+  const leftGeo = useMemo(() => createBankRibbonGeometry(-1, 0.08, 0.82, 0.018), []);
+  const rightGeo = useMemo(() => createBankRibbonGeometry(1, 0.08, 0.82, 0.018), []);
+  const pebbleMatrices = useMemo(() => {
+    const rng = seededRng(619);
+    const dummy = new THREE.Object3D();
+    const arr = [];
+    for (let i = 0; i < 170; i++) {
+      const z = STREAM_START_Z - 0.55 + rng() * (STREAM_END_Z - STREAM_START_Z + 0.55);
+      const side = rng() > 0.5 ? 1 : -1;
+      const streamZ = THREE.MathUtils.clamp(z, STREAM_START_Z, STREAM_END_Z);
+      const half = streamHalfWidth(streamZ);
+      const x = streamCenterX(streamZ) + side * (half + 0.18 + rng() * 0.72);
+      const size = 0.04 + rng() * 0.11;
+      dummy.position.set(x, getTerrainHeight(x, z) + size * 0.13 + 0.025, z);
+      dummy.rotation.set(rng() * 0.25, rng() * Math.PI, rng() * 0.2);
+      dummy.scale.set(size * (1.2 + rng()), size * 0.28, size * (0.8 + rng()));
+      dummy.updateMatrix();
+      arr.push(dummy.matrix.clone());
+    }
+    return arr;
+  }, []);
+  const pebbleRef = useRef();
+
+  useEffect(() => setInstancedMatrices(pebbleRef.current, pebbleMatrices), [pebbleMatrices]);
+
+  return (
+    <group name="stream-gravel-banks">
+      <mesh geometry={leftGeo} material={material} receiveShadow />
+      <mesh geometry={rightGeo} material={material} receiveShadow />
+      <instancedMesh ref={pebbleRef} args={[null, null, pebbleMatrices.length]} receiveShadow>
+        <dodecahedronGeometry args={[0.5, 0]} />
+        <meshStandardMaterial color="#9f957f" roughness={0.95} />
+      </instancedMesh>
+    </group>
+  );
+}
+
+function bakeStreamGrassModel(scene) {
+  const parts = [];
+  const bounds = new THREE.Box3();
+  scene.updateMatrixWorld(true);
+
+  scene.traverse((child) => {
+    if (!child.isMesh || !child.geometry) return;
+    const geometry = child.geometry.clone();
+    geometry.applyMatrix4(child.matrixWorld);
+    geometry.morphAttributes = {};
+    geometry.morphTargetsRelative = false;
+    geometry.computeBoundingBox();
+    bounds.union(geometry.boundingBox);
+    const sourceMaterial = Array.isArray(child.material) ? child.material[0] : child.material;
+    parts.push({
+      geometry,
+      material: sourceMaterial.clone(),
+      name: child.name,
+    });
+  });
+
+  if (parts.length === 0 || bounds.isEmpty()) return [];
+
+  const center = bounds.getCenter(new THREE.Vector3());
+  const floorOffset = new THREE.Matrix4().makeTranslation(-center.x, -bounds.min.y, -center.z);
+  return parts.map((part, index) => {
+    part.geometry.applyMatrix4(floorOffset);
+    part.geometry.computeVertexNormals();
+    part.material.color?.lerp(new THREE.Color(index % 2 ? '#5b8f3c' : '#477d34'), 0.35);
+    part.material.roughness = Math.max(part.material.roughness ?? 0.85, 0.88);
+    part.material.side = THREE.DoubleSide;
+    return part;
+  });
+}
+
+function StreamBankGrass() {
+  const meshRefs = useRef([]);
+  const gltf = useGLTF(STREAM_GRASS_MODEL_URL);
+  const parts = useMemo(() => bakeStreamGrassModel(gltf.scene), [gltf.scene]);
+  const matrices = useMemo(() => {
+    const rng = seededRng(845);
+    const dummy = new THREE.Object3D();
+    const arr = [];
+    const clusters = 92;
+
+    for (let i = 0; i < clusters; i++) {
+      const z = STREAM_START_Z - 0.5 + (i / (clusters - 1)) * (STREAM_END_Z - STREAM_START_Z + 0.5);
+      for (const side of [-1, 1]) {
+        if (rng() < 0.18) continue;
+        const streamZ = THREE.MathUtils.clamp(z, STREAM_START_Z, STREAM_END_Z);
+        const half = streamHalfWidth(streamZ);
+        const x = streamCenterX(streamZ) + side * (half + 0.82 + rng() * 0.95);
+        const scale = 0.052 + rng() * 0.045;
+        dummy.position.set(x, getTerrainHeight(x, z) + 0.012, z + (rng() - 0.5) * 0.42);
+        dummy.rotation.set((rng() - 0.5) * 0.08, rng() * Math.PI * 2, (rng() - 0.5) * 0.1);
+        dummy.scale.set(
+          scale * (0.9 + rng() * 0.7),
+          scale * (0.8 + rng() * 0.9),
+          scale * (0.9 + rng() * 0.7)
+        );
+        dummy.updateMatrix();
+        arr.push(dummy.matrix.clone());
+      }
+    }
+    return arr;
+  }, []);
+
+  useEffect(() => {
+    meshRefs.current.forEach((mesh) => setInstancedMatrices(mesh, matrices));
+  }, [matrices, parts]);
+
+  return (
+    <group name="stream-bank-grass-glb">
+      {parts.map((part, index) => (
+        <instancedMesh
+          key={`stream-grass-${part.name || index}`}
+          ref={(mesh) => { meshRefs.current[index] = mesh; }}
+          args={[part.geometry, part.material, matrices.length]}
+          receiveShadow
+        />
+      ))}
     </group>
   );
 }
@@ -349,8 +551,9 @@ function Waterfall() {
   const geometry = useMemo(() => {
     const endZ = STREAM_END_Z;
     const width = streamHalfWidth(endZ) * 2.4;
-    const topY = WATER_Y - 0.02;
-    const bottomY = WATER_Y - 2.45;
+    const streamEndY = getStreamWaterHeight(endZ);
+    const topY = streamEndY - 0.02;
+    const bottomY = streamEndY - 1.35;
     const x = streamCenterX(endZ);
     const z = endZ + 0.16;
     const geo = new THREE.BufferGeometry();
@@ -371,18 +574,20 @@ function Waterfall() {
 
   const endX = streamCenterX(STREAM_END_Z);
   const bottomZ = STREAM_END_Z + 0.58;
+  const streamEndY = getStreamWaterHeight(STREAM_END_Z);
+  const splashY = streamEndY - 1.4;
 
   return (
     <group>
       <mesh geometry={geometry} renderOrder={0}>
         <primitive object={mat} attach="material" />
       </mesh>
-      <mesh position={[endX, WATER_Y - 2.5, bottomZ]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh position={[endX, splashY, bottomZ]} rotation={[-Math.PI / 2, 0, 0]}>
         <ringGeometry args={[0.55, 1.25, 40]} />
         <meshBasicMaterial color="#e8fbff" transparent opacity={0.42} depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
-      <WaterfallMist position={[endX - 0.28, WATER_Y - 2.47, bottomZ + 0.14]} scale={0.9} />
-      <WaterfallMist position={[endX + 0.38, WATER_Y - 2.44, bottomZ - 0.08]} scale={0.72} />
+      <WaterfallMist position={[endX - 0.28, splashY + 0.03, bottomZ + 0.14]} scale={0.9} />
+      <WaterfallMist position={[endX + 0.38, splashY + 0.06, bottomZ - 0.08]} scale={0.72} />
     </group>
   );
 }
@@ -739,3 +944,5 @@ export default function Pond() {
 export function PondStream() {
   return <StreamWater />;
 }
+
+useGLTF.preload(STREAM_GRASS_MODEL_URL);

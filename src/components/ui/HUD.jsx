@@ -44,6 +44,8 @@ export default function HUD({
   // Interactions
   onSelectAnimal,
   onForceAbility,
+  minimalDestinationMarkers = false,
+  onMinimalDestinationMarkersChange,
   // Clock reporting (for Sky/Lighting)
   onClockUpdate,
 }) {
@@ -58,6 +60,7 @@ export default function HUD({
   });
   const [simSpeed, setSimSpeed] = useState(1);
   const [isMobile, setIsMobile] = useState(false);
+  const collapseTimer = useRef(null);
 
   // Simulation clock
   const clock = useSimulationClock(simSpeed);
@@ -121,24 +124,37 @@ export default function HUD({
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  // Auto-collapse panel on mobile
+  // Show expanded panel briefly when an animal is selected, then collapse.
   useEffect(() => {
-    if (isMobile) setPanelCollapsed(true);
-  }, [isMobile, selectedAnimalId]);
+    if (!selectedAnimalId) {
+      setPanelHidden(true);
+      setPanelCollapsed(true);
+      if (collapseTimer.current) {
+        clearTimeout(collapseTimer.current);
+        collapseTimer.current = null;
+      }
+      return undefined;
+    }
 
-  // Show panel when new animal selected
-  useEffect(() => {
     if (selectedAnimalId) {
       setPanelHidden(false);
+      setPanelCollapsed(false);
+      if (collapseTimer.current) clearTimeout(collapseTimer.current);
+      collapseTimer.current = setTimeout(() => {
+        setPanelCollapsed(true);
+        collapseTimer.current = null;
+      }, isMobile ? 3600 : 5000);
     }
-  }, [selectedAnimalId]);
+    return () => {
+      if (collapseTimer.current) clearTimeout(collapseTimer.current);
+    };
+  }, [isMobile, selectedAnimalId]);
 
   // Select handler with audio
   const handleSelectAnimal = useCallback((id) => {
     onSelectAnimal?.(id);
     playSelect();
-    if (isMobile) setPanelCollapsed(false);
-  }, [onSelectAnimal, isMobile]);
+  }, [onSelectAnimal]);
 
   // Camera mode handler with audio
   const handleCameraMode = useCallback((mode) => {
@@ -148,6 +164,10 @@ export default function HUD({
 
   // Panel toggle with audio
   const handlePanelToggle = useCallback(() => {
+    if (collapseTimer.current) {
+      clearTimeout(collapseTimer.current);
+      collapseTimer.current = null;
+    }
     setPanelCollapsed((c) => {
       if (c) playPanelOpen();
       else playPanelClose();
@@ -246,6 +266,8 @@ export default function HUD({
         onCameraSettingsChange={onCameraSettingsChange}
         simSpeed={simSpeed}
         onSimSpeedChange={setSimSpeed}
+        minimalDestinationMarkers={minimalDestinationMarkers}
+        onMinimalDestinationMarkersChange={onMinimalDestinationMarkersChange}
       />
 
       {/* ── MODAL: Search Overlay ── */}

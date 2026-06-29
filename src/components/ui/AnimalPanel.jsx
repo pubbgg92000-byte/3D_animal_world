@@ -32,14 +32,12 @@ export default function AnimalPanel({
   onClose,
   learningMode = false,
 }) {
-  if (!config) return null;
-
-  const species = config.species || config.id;
+  const species = config?.species || config?.id;
   const emoji = SPECIES_EMOJIS[species] || '🐾';
   const abilities = SPECIES_ABILITIES[species] || [];
   const behaviorInfo = getBehaviorDisplay(behavior);
   const healthInfo = getHealthStatus(stats);
-  const speciesData = getSpeciesData(config.id);
+  const speciesData = config ? getSpeciesData(config.id) : null;
 
   // Rotating fun fact — changes each time the animal is selected
   const [funFact, setFunFact] = useState(null);
@@ -47,7 +45,7 @@ export default function AnimalPanel({
     if (speciesData) {
       setFunFact(getRandomFunFact(species));
     }
-  }, [config.id, species, speciesData]);
+  }, [config?.id, species, speciesData]);
 
   // Map behaviors to active abilities
   const isAbilityActive = useMemo(() => {
@@ -61,7 +59,7 @@ export default function AnimalPanel({
   }, [behavior]);
 
   // Average health percentage for collapsed view
-  const avgHealth = Math.round(
+  const _avgHealth = Math.round(
     ((stats.energy ?? 100) + (stats.hydration ?? 100) + (stats.hunger ?? 100)) / 3
   );
 
@@ -69,11 +67,17 @@ export default function AnimalPanel({
     ? CONSERVATION_COLORS[speciesData.conservationStatus] || '#4ADE80'
     : '#4ADE80';
 
+  if (!config) return null;
+
   return (
     <div className={`wt-animal-panel ${collapsed ? 'wt-animal-panel--collapsed' : ''}`}>
       {/* ── Header (always visible) ── */}
       <div className="wt-animal-panel__header-row">
-        <button className="wt-animal-panel__header" onClick={onToggleCollapse}>
+        <button
+          className="wt-animal-panel__header"
+          onClick={onToggleCollapse}
+          aria-expanded={!collapsed}
+        >
           <span className="wt-animal-panel__emoji">{emoji}</span>
           <div className="wt-animal-panel__identity">
             <span className="wt-animal-panel__name">{config.displayName || config.name}</span>
@@ -86,8 +90,11 @@ export default function AnimalPanel({
             <span className="wt-animal-panel__health-dot" style={{ backgroundColor: healthInfo.color }} />
             {healthInfo.label}
           </div>
+          <span className="wt-animal-panel__details-label" aria-hidden={!collapsed}>
+            Details
+          </span>
           <span className={`wt-animal-panel__chevron ${collapsed ? '' : 'wt-animal-panel__chevron--open'}`}>
-            ▸
+            {collapsed ? '▾' : '▴'}
           </span>
         </button>
         <button

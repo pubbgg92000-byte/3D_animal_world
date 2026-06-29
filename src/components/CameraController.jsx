@@ -71,7 +71,7 @@ const MODES = {
     autoRotate: false,
     autoRotateSpeed: 0,
     minDistance: 1,
-    maxDistance: 100,
+    maxDistance: 180,
     minPolarAngle: 0.05,
     maxPolarAngle: Math.PI - 0.1,
     positionSpring: 2.0,
@@ -146,7 +146,7 @@ export default function CameraController({
   }, [mode]);
 
   useFrame((_, delta) => {
-    if (!targetPosition || !controlsRef.current) return;
+    if (!controlsRef.current) return;
 
     // Dynamic FOV
     if (Math.abs(camera.fov - fov) > 0.5) {
@@ -155,6 +155,10 @@ export default function CameraController({
     }
 
     const controls = controlsRef.current;
+    if (!targetPosition) {
+      controls.update();
+      return;
+    }
     const animalPos = targetPosition;
 
     // Track velocity for anticipation (documentary-style)
@@ -162,7 +166,10 @@ export default function CameraController({
     prevTargetPos.current.copy(animalPos);
 
     // In free mode, don't auto-follow
-    if (mode === 'free') return;
+    if (mode === 'free') {
+      controls.update();
+      return;
+    }
 
     const offset = config.offset;
     if (!offset) return;
@@ -232,6 +239,7 @@ export default function CameraController({
       enablePan={true}
       enableZoom={true}
       zoomSpeed={zoomSpeed}
+      panSpeed={1.2}
       enableRotate={true}
       enableDamping={true}
       dampingFactor={0.06}

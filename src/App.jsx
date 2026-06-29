@@ -21,6 +21,10 @@ import Grass from './components/environment/Grass/Grass';
 import Terrain from './components/environment/Terrain/Terrain';
 
 import { playClick } from './hooks/useAudioFeedback';
+import {
+  createWaterApproachPoints,
+  isWaterAt,
+} from './utils/world';
 
 const CANVAS_DPR = [1, 1.35];
 const SHADOW_CONFIG = { type: THREE.PCFShadowMap };
@@ -37,6 +41,124 @@ const CAMERA_CONFIG = {
   position: [8, 5, 10],
 };
 const LAST_SELECTED_ANIMAL_KEY = 'wild-trails:last-selected-animal';
+const MINIMAL_MARKERS_KEY = 'wild-trails:minimal-destination-markers';
+const WATER_APPROACH_POINTS = createWaterApproachPoints();
+
+const COMMANDS = {
+  walk: {
+    type: 'walk',
+    label: 'Explore',
+    icon: '🍃',
+    behavior: null,
+    feedback: 'Exploring',
+  },
+  drink: {
+    type: 'drink',
+    label: 'Drink',
+    icon: '💧',
+    behavior: 'Drink',
+    feedback: 'Hydrated',
+  },
+  food: {
+    type: 'food',
+    label: 'Search Food',
+    icon: '🍓',
+    behavior: 'Graze',
+    feedback: '+15 Energy',
+  },
+  rest: {
+    type: 'rest',
+    label: 'Rest',
+    icon: '🌲',
+    behavior: 'Sleep',
+    feedback: 'Well Rested',
+  },
+  shelter: {
+    type: 'shelter',
+    label: 'Shelter',
+    icon: '🪵',
+    behavior: 'Sleep',
+    feedback: 'Sheltered',
+  },
+  hunt: {
+    type: 'hunt',
+    label: 'Hunt',
+    icon: '🐾',
+    behavior: 'Hunt Prey',
+    feedback: 'Caught Prey',
+  },
+  fish: {
+    type: 'fish',
+    label: 'Fish',
+    icon: '🐟',
+    behavior: 'Hunt Fish',
+    feedback: 'Caught Fish',
+  },
+};
+
+function getNearestWaterBank(point) {
+  let best = WATER_APPROACH_POINTS[0];
+  let bestDistance = Infinity;
+  for (const candidate of WATER_APPROACH_POINTS) {
+    const distance = candidate.distanceToSquared(point);
+    if (distance < bestDistance) {
+      best = candidate;
+      bestDistance = distance;
+    }
+  }
+  return best.clone();
+}
+
+function getCommandOptions(point, selectedConfig) {
+  const species = selectedConfig?.species || selectedConfig?.id;
+  const isPredator = species === 'bear' || species === 'fox';
+  const nearWater = isWaterAt(point.x, point.z, 1.2);
+  const options = [];
+
+  if (nearWater) {
+    options.push(species === 'bear' ? COMMANDS.fish : COMMANDS.drink);
+    if (species !== 'bear') options.push(COMMANDS.drink);
+  }
+
+  options.push(COMMANDS.walk);
+  if (isPredator) options.push(COMMANDS.hunt);
+  else options.push(COMMANDS.food);
+  options.push(COMMANDS.rest, COMMANDS.shelter);
+
+  return Array.from(new Map(options.map((option) => [option.type, option])).values());
+}
+
+function EcosystemActionMenu({ commandTarget, selectedConfig, onChoose, onClose }) {
+  if (!commandTarget) return null;
+  const options = getCommandOptions(commandTarget.point, selectedConfig);
+  const x = Math.min(window.innerWidth - 220, Math.max(16, commandTarget.screen.x));
+  const y = Math.min(window.innerHeight - 210, Math.max(72, commandTarget.screen.y));
+
+  return (
+    <div
+      className="wt-ecosystem-menu"
+      style={{ left: x, top: y }}
+      role="menu"
+      aria-label="Choose natural behaviour"
+    >
+      <div className="wt-ecosystem-menu__title">Guide wildlife</div>
+      {options.map((option) => (
+        <button
+          key={option.type}
+          className="wt-ecosystem-menu__item"
+          onClick={() => onChoose(option)}
+          role="menuitem"
+        >
+          <span>{option.icon}</span>
+          <strong>{option.label}</strong>
+        </button>
+      ))}
+      <button className="wt-ecosystem-menu__dismiss" onClick={onClose}>
+        Cancel
+      </button>
+    </div>
+  );
+}
 
 function getInitialSelectedAnimalId() {
   if (typeof window === 'undefined') return ANIMAL_LIST[0]?.id || 'moose';
@@ -49,6 +171,16 @@ function getInitialSelectedAnimalId() {
     // localStorage can be blocked in private/restricted browser contexts.
   }
   return ANIMAL_LIST[0]?.id || 'moose';
+}
+
+function getStoredSelectedAnimalId() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const savedId = window.localStorage.getItem(LAST_SELECTED_ANIMAL_KEY);
+    return savedId && ANIMAL_LIST.some((animal) => animal.id === savedId) ? savedId : null;
+  } catch {
+    return null;
+  }
 }
 
 /* ========================================
@@ -179,6 +311,7 @@ export default function App() {
 
   // Selection
   const [selectedId, setSelectedId] = useState(getInitialSelectedAnimalId);
+  const lastSelectedId = useRef(getStoredSelectedAnimalId() || getInitialSelectedAnimalId());
 
   // Per-animal destinations
   const [destinations, setDestinations] = useState({});
@@ -186,7 +319,12 @@ export default function App() {
   const [runningFor, setRunningFor] = useState({});
 
   // Active destination marker (only for selected animal)
-  const [activeMarker, setActiveMarker] = useState(null); // { position: THREE.Vector3, arrived: false }
+  const [activeMarker, setActiveMarker] = useState(null);
+  const [commandTarget, setCommandTarget] = useState(null);
+  const [minimalDestinationMarkers, setMinimalDestinationMarkers] = useState(() => {
+    try { return localStorage.getItem(MINIMAL_MARKERS_KEY) === 'true'; }
+    catch { return false; }
+  });
 
   // Per-animal stats and behaviors
   const [allStats, setAllStats] = useState({});
@@ -195,6 +333,7 @@ export default function App() {
 
   // Camera
   const [cameraMode, setCameraMode] = useState('follow');
+  const lastAnimalCameraMode = useRef('follow');
   const [cameraPosition, setCameraPosition] = useState(null);
   const [cameraSettings, setCameraSettings] = useState({
     fov: 45,
@@ -209,6 +348,51 @@ export default function App() {
   const handleClockUpdate = useCallback((m) => {
     simMinutesRef.current = m;
   }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(MINIMAL_MARKERS_KEY, String(minimalDestinationMarkers));
+    } catch {
+      // Settings still work for the current session.
+    }
+  }, [minimalDestinationMarkers]);
+
+  useEffect(() => {
+    if (!commandTarget) return undefined;
+    const timer = setTimeout(() => setCommandTarget(null), 4000);
+    return () => clearTimeout(timer);
+  }, [commandTarget]);
+
+  useEffect(() => {
+    const handler = (event) => {
+      if (event.key === 'Escape') setCommandTarget(null);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  const completeActiveMarker = useCallback(() => {
+    const behavior = activeMarker?.command?.behavior;
+    setActiveMarker((prev) => prev ? { ...prev, arrived: true } : null);
+    setCommandTarget(null);
+
+    if (behavior && selectedId) {
+      setForcedBehaviors((current) => ({
+        ...current,
+        [selectedId]: behavior,
+      }));
+      setTimeout(() => {
+        setForcedBehaviors((current) => {
+          if (current[selectedId] !== behavior) return current;
+          const next = { ...current };
+          delete next[selectedId];
+          return next;
+        });
+      }, 7000);
+    }
+
+    setTimeout(() => setActiveMarker(null), 1700);
+  }, [activeMarker, selectedId]);
 
   // Periodically snapshot positions for minimap + arrival detection
   useEffect(() => {
@@ -227,15 +411,13 @@ export default function App() {
           const dz = animalPos.z - activeMarker.position.z;
           const dist = Math.sqrt(dx * dx + dz * dz);
           if (dist < ARRIVAL_THRESHOLD) {
-            setActiveMarker((prev) => prev ? { ...prev, arrived: true } : null);
-            // Clear marker after dissolve animation
-            setTimeout(() => setActiveMarker(null), 1500);
+            completeActiveMarker();
           }
         }
       }
     }, 300);
     return () => clearInterval(interval);
-  }, [activeMarker, selectedId]);
+  }, [activeMarker, completeActiveMarker, selectedId]);
 
   // Progressive asset streaming
   useEffect(() => {
@@ -254,15 +436,31 @@ export default function App() {
 
   // ---------- Handlers ----------
 
-  const handleGroundClick = useCallback(
-    (point) => {
+  const issueCommand = useCallback(
+    (point, command, { run = false } = {}) => {
       if (!selectedId) return;
+      const destination = isWaterAt(point.x, point.z, 0.9)
+        ? getNearestWaterBank(point)
+        : point.clone();
+
       playClick();
-      setDestinations((prev) => ({ ...prev, [selectedId]: point }));
+      setDestinations((prev) => ({ ...prev, [selectedId]: destination }));
       setDestinationSerials((prev) => ({ ...prev, [selectedId]: (prev[selectedId] || 0) + 1 }));
-      setRunningFor((prev) => ({ ...prev, [selectedId]: false }));
-      // Set marker
-      setActiveMarker({ position: point.clone(), arrived: false });
+      setRunningFor((prev) => ({ ...prev, [selectedId]: run }));
+      setActiveMarker({
+        position: destination.clone(),
+        arrived: false,
+        command,
+      });
+      setCommandTarget(null);
+    },
+    [selectedId]
+  );
+
+  const handleGroundClick = useCallback(
+    (point, screen) => {
+      if (!selectedId) return;
+      setCommandTarget({ point, screen });
     },
     [selectedId]
   );
@@ -270,26 +468,41 @@ export default function App() {
   const handleGroundDoubleClick = useCallback(
     (point) => {
       if (!selectedId) return;
-      playClick();
-      setDestinations((prev) => ({ ...prev, [selectedId]: point }));
-      setDestinationSerials((prev) => ({ ...prev, [selectedId]: (prev[selectedId] || 0) + 1 }));
-      setRunningFor((prev) => ({ ...prev, [selectedId]: true }));
-      // Set marker
-      setActiveMarker({ position: point.clone(), arrived: false });
+      issueCommand(point, COMMANDS.walk, { run: true });
     },
-    [selectedId]
+    [issueCommand, selectedId]
   );
 
   const handleSelectAnimal = useCallback((id) => {
-    setSelectedId(id);
-    // Clear marker on animal change
     setActiveMarker(null);
-    try {
-      window.localStorage.setItem(LAST_SELECTED_ANIMAL_KEY, id);
-    } catch {
-      // Selection still works even if persistence is unavailable.
+    setCommandTarget(null);
+
+    setSelectedId((current) => {
+      if (current === id) {
+        if (cameraMode !== 'free') lastAnimalCameraMode.current = cameraMode;
+        setCameraMode('free');
+        return null;
+      }
+
+      lastSelectedId.current = id;
+      if (cameraMode === 'free') setCameraMode(lastAnimalCameraMode.current || 'follow');
+      else lastAnimalCameraMode.current = cameraMode;
+
+      try {
+        window.localStorage.setItem(LAST_SELECTED_ANIMAL_KEY, id);
+      } catch {
+        // Selection still works even if persistence is unavailable.
+      }
+      return id;
+    });
+  }, [cameraMode]);
+
+  const handleCameraModeChange = useCallback((mode) => {
+    setCameraMode(mode);
+    if (selectedId && mode !== 'free') {
+      lastAnimalCameraMode.current = mode;
     }
-  }, []);
+  }, [selectedId]);
 
   const handlePositionUpdate = useCallback((id, pos) => {
     if (!animalPositions.current[id]) {
@@ -339,7 +552,9 @@ export default function App() {
   }, [selectedId]);
 
   // Camera target = selected animal position
-  const cameraTarget = animalPositions.current[selectedId] || new THREE.Vector3();
+  const cameraTarget = selectedId
+    ? animalPositions.current[selectedId] || new THREE.Vector3()
+    : null;
 
   // State label for camera
   const selectedBehavior = allBehaviors[selectedId] || 'Idle';
@@ -368,14 +583,23 @@ export default function App() {
         animalStats={allStats}
         animalBehaviors={allBehaviors}
         animalPositions={animalPositionsSnapshot}
-        cameraMode={cameraMode}
+        cameraMode={selectedId ? cameraMode : 'free'}
         cameraPosition={cameraPosition}
         cameraSettings={cameraSettings}
-        onCameraModeChange={setCameraMode}
+        onCameraModeChange={handleCameraModeChange}
         onCameraSettingsChange={setCameraSettings}
         onSelectAnimal={handleSelectAnimal}
         onForceAbility={handleForceAbility}
         onClockUpdate={handleClockUpdate}
+        minimalDestinationMarkers={minimalDestinationMarkers}
+        onMinimalDestinationMarkersChange={setMinimalDestinationMarkers}
+      />
+
+      <EcosystemActionMenu
+        commandTarget={commandTarget}
+        selectedConfig={ANIMAL_LIST.find((animal) => animal.id === selectedId)}
+        onChoose={(command) => issueCommand(commandTarget.point, command)}
+        onClose={() => setCommandTarget(null)}
       />
 
       <Canvas
@@ -410,7 +634,7 @@ export default function App() {
 
         <CameraController
           targetPosition={cameraTarget}
-          mode={cameraMode}
+          mode={selectedId ? cameraMode : 'free'}
           mooseState={mooseState}
           fov={cameraSettings.fov}
           smoothness={cameraSettings.smoothness}
@@ -424,13 +648,15 @@ export default function App() {
           <DestinationMarker
             position={activeMarker.position}
             arrived={activeMarker.arrived}
-            animalPosition={animalPositions.current[selectedId]}
+            type={activeMarker.command?.type}
+            minimal={minimalDestinationMarkers}
+            feedback={activeMarker.command?.feedback}
           />
         )}
 
         {/* Spawn all animals */}
         {ANIMAL_LIST
-          .filter((cfg) => loadStage >= 3 || cfg.id === selectedId)
+          .filter((cfg) => loadStage >= 3 || cfg.id === selectedId || (!selectedId && cfg.id === lastSelectedId.current))
           .map((cfg) => (
           <AnimalErrorBoundary key={cfg.id} animalId={cfg.id}>
             <Suspense fallback={null}>

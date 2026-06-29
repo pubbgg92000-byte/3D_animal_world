@@ -60,6 +60,17 @@ function smoothstep(t) {
   return v * v * (3 - 2 * v);
 }
 
+export function getStreamWaterHeight(z) {
+  const clampedZ = THREE.MathUtils.clamp(z, STREAM_START_Z, STREAM_END_Z);
+  const t = THREE.MathUtils.clamp(
+    (clampedZ - STREAM_START_Z) / 6,
+    0,
+    1
+  );
+  const localSurface = baseTerrainHeight(streamCenterX(clampedZ), clampedZ) - 0.16;
+  return THREE.MathUtils.lerp(POND_WATER_Y - 0.18, localSurface, smoothstep(t));
+}
+
 /** Ground height shared by terrain, animals, vegetation, trees, and AI. */
 export function getTerrainHeight(x, z) {
   let y = baseTerrainHeight(x, z);
@@ -70,13 +81,18 @@ export function getTerrainHeight(x, z) {
     y = THREE.MathUtils.lerp(-1.6, y, blend);
   }
 
-  if (z >= STREAM_START_Z && z <= STREAM_END_Z) {
-    const center = streamCenterX(z);
-    const halfWidth = streamHalfWidth(z) + 0.45;
+  const streamMouthStart = STREAM_START_Z - 0.65;
+  if (z >= streamMouthStart && z <= STREAM_END_Z) {
+    const clampedZ = THREE.MathUtils.clamp(z, STREAM_START_Z, STREAM_END_Z);
+    const center = streamCenterX(clampedZ);
+    const mouthBlend = smoothstep((z - streamMouthStart) / (STREAM_START_Z - streamMouthStart));
+    const halfWidth = streamHalfWidth(clampedZ) + THREE.MathUtils.lerp(1.05, 0.62, mouthBlend);
     const distance = Math.abs(x - center);
     if (distance < halfWidth) {
       const blend = smoothstep(distance / halfWidth);
-      y = THREE.MathUtils.lerp(-0.18, y, blend);
+      const centerDepth = THREE.MathUtils.lerp(0.34, 0.2, blend);
+      const bedY = getStreamWaterHeight(clampedZ) - centerDepth;
+      y = Math.min(y, THREE.MathUtils.lerp(bedY, y, blend));
     }
   }
 

@@ -2,8 +2,26 @@ import { useEffect, useMemo } from 'react';
 import { useAssetManager } from '../AssetManager';
 import { generateForest, WORLD_SEED } from '../worldGenerator';
 import { registerStaticObstacles, unregisterStaticObstacles } from '../../../utils/collisionRegistry';
+import {
+  POND_RADIUS,
+  POND_X,
+  POND_Z,
+  STREAM_END_Z,
+  STREAM_START_Z,
+  streamCenterX,
+  streamHalfWidth,
+} from '../../../utils/world';
 import Tree from './Tree';
 import Rock from './Rock';
+
+function isInWaterClearing({ x, z }, margin = 0) {
+  if (Math.hypot(x - POND_X, z - POND_Z) < POND_RADIUS + margin) return true;
+  if (z < STREAM_START_Z - 1 || z > STREAM_END_Z + 1) return false;
+
+  const clampedZ = Math.min(STREAM_END_Z, Math.max(STREAM_START_Z, z));
+  const channelRadius = streamHalfWidth(clampedZ) + margin;
+  return Math.abs(x - streamCenterX(clampedZ)) < channelRadius;
+}
 
 function groupByAsset(instances) {
   const groups = new Map();
@@ -20,13 +38,21 @@ export default function Forest() {
     () => generateForest(WORLD_SEED, forest.trees, forest.rocks),
     [forest.rocks, forest.trees]
   );
-  const treeGroups = useMemo(() => groupByAsset(generated.trees), [generated.trees]);
-  const rockGroups = useMemo(() => groupByAsset(generated.rocks), [generated.rocks]);
+  const visibleTrees = useMemo(
+    () => generated.trees.filter((tree) => !isInWaterClearing(tree, 6.2)),
+    [generated.trees]
+  );
+  const visibleRocks = useMemo(
+    () => generated.rocks.filter((rock) => !isInWaterClearing(rock, 1.4)),
+    [generated.rocks]
+  );
+  const treeGroups = useMemo(() => groupByAsset(visibleTrees), [visibleTrees]);
+  const rockGroups = useMemo(() => groupByAsset(visibleRocks), [visibleRocks]);
 
   useEffect(() => {
     registerStaticObstacles(
       'asset-forest',
-      generated.trees.map((tree) => {
+      visibleTrees.map((tree) => {
         const asset = forest.trees[tree.assetIndex];
         return {
           x: tree.x,
@@ -37,7 +63,7 @@ export default function Forest() {
     );
     registerStaticObstacles(
       'asset-rocks',
-      generated.rocks.map((rock) => {
+      visibleRocks.map((rock) => {
         const asset = forest.rocks[rock.assetIndex];
         return {
           x: rock.x,
@@ -52,7 +78,7 @@ export default function Forest() {
       unregisterStaticObstacles('asset-forest');
       unregisterStaticObstacles('asset-rocks');
     };
-  }, [forest.rocks, forest.trees, generated.rocks, generated.trees]);
+  }, [forest.rocks, forest.trees, visibleRocks, visibleTrees]);
 
   return (
     <group name="asset-forest">

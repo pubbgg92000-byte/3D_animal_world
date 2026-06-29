@@ -1,23 +1,86 @@
-import { useRef, useMemo, useEffect } from 'react';
+import { useRef, useMemo, useEffect, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
+import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 
 /**
  * DestinationMarker — Nature-themed click-to-move feedback.
  *
  * When player clicks ground:
- *  - A glowing forest rune appears at the click point
+ *  - A typed forest marker appears at the click point
  *  - Leaf particles spiral outward
  *  - Marker gently pulses while animal walks
- *  - Dotted path line from animal to destination
  *  - On arrival: dissolves upward into leaf burst
  */
 
 const LEAF_COUNT = 10;
 const RUNE_SEGMENTS = 32;
 
+const MARKER_TYPES = {
+  walk: {
+    icon: '🍃',
+    label: 'Explore',
+    detail: 'Walk here',
+    primary: '#79b66b',
+    glow: '#b8d88a',
+    particle: '#7fbf5f',
+  },
+  drink: {
+    icon: '💧',
+    label: 'Water',
+    detail: 'Drink',
+    primary: '#5fb7d6',
+    glow: '#9ed8e7',
+    particle: '#7ec9df',
+  },
+  food: {
+    icon: '🍓',
+    label: 'Berry Patch',
+    detail: 'Fresh food',
+    primary: '#b85a4b',
+    glow: '#e5a56e',
+    particle: '#8dbd5f',
+  },
+  rest: {
+    icon: '🌲',
+    label: 'Shade Rest',
+    detail: 'Rest here',
+    primary: '#8c6a3f',
+    glow: '#c7a66b',
+    particle: '#9d8653',
+  },
+  shelter: {
+    icon: '🪵',
+    label: 'Shelter',
+    detail: 'Hide here',
+    primary: '#7d6546',
+    glow: '#b49a70',
+    particle: '#8b7657',
+  },
+  hunt: {
+    icon: '🐾',
+    label: 'Hunting Ground',
+    detail: 'Search prey',
+    primary: '#9b6b4b',
+    glow: '#d0a06b',
+    particle: '#a37a55',
+  },
+  fish: {
+    icon: '🐟',
+    label: 'Fish Pool',
+    detail: 'Catch fish',
+    primary: '#4c9fc2',
+    glow: '#87d0dd',
+    particle: '#74b7c9',
+  },
+};
+
+function getMarkerMeta(type) {
+  return MARKER_TYPES[type] || MARKER_TYPES.walk;
+}
+
 /* ── Leaf Particle System ── */
-function LeafParticles({ position, arrived }) {
+function LeafParticles({ arrived, color = '#7fbf5f' }) {
   const meshRef = useRef();
   const particlesRef = useRef([]);
   const timeRef = useRef(0);
@@ -60,9 +123,6 @@ function LeafParticles({ position, arrived }) {
     if (!meshRef.current) return;
     timeRef.current += delta;
 
-    const matrices = [];
-    const dummy = new THREE.Object3D();
-
     particlesRef.current.forEach((p, i) => {
       if (arrived) {
         // Burst upward on arrival
@@ -81,23 +141,11 @@ function LeafParticles({ position, arrived }) {
       p.rotation += p.rotSpeed * delta;
       p.angle += delta * 0.5;
 
-      dummy.position.set(
-        position.x + Math.cos(p.angle) * p.radius,
-        position.y + 0.15 + p.y,
-        position.z + Math.sin(p.angle) * p.radius
-      );
-      dummy.rotation.set(p.rotation, p.rotation * 0.5, 0);
-      dummy.scale.setScalar(p.size * Math.max(0, p.opacity));
-      dummy.updateMatrix();
-    });
-
-    // Update instanced mesh
-    particlesRef.current.forEach((p, i) => {
       const dummy = new THREE.Object3D();
       dummy.position.set(
-        position.x + Math.cos(p.angle) * p.radius,
-        position.y + 0.15 + p.y,
-        position.z + Math.sin(p.angle) * p.radius
+        Math.cos(p.angle) * p.radius,
+        0.15 + p.y,
+        Math.sin(p.angle) * p.radius
       );
       dummy.rotation.set(p.rotation, p.rotation * 0.5, 0);
       dummy.scale.setScalar(p.size * Math.max(0, p.opacity));
@@ -108,12 +156,12 @@ function LeafParticles({ position, arrived }) {
   });
 
   const material = useMemo(() => new THREE.MeshBasicMaterial({
-    color: new THREE.Color('#4ade80'),
+    color: new THREE.Color(color),
     transparent: true,
     opacity: 0.7,
     side: THREE.DoubleSide,
     depthWrite: false,
-  }), []);
+  }), [color]);
 
   return (
     <instancedMesh ref={meshRef} args={[geometry, material, LEAF_COUNT]} />
@@ -121,33 +169,41 @@ function LeafParticles({ position, arrived }) {
 }
 
 /* ── Glowing Rune Ring ── */
-function RuneRing({ position, arrived }) {
+function NatureGlyph({ type = 'walk', minimal = false, arrived }) {
+  const meta = getMarkerMeta(type);
+  const groupRef = useRef();
   const ringRef = useRef();
   const innerRef = useRef();
+  const iconRef = useRef();
   const timeRef = useRef(0);
 
   useFrame((_, delta) => {
     timeRef.current += delta;
+    const fade = arrived
+      ? Math.max(0, 1 - timeRef.current * 1.1)
+      : Math.max(0.25, 1 - timeRef.current * 0.018);
+    const pulse = 1 + Math.sin(timeRef.current * 2.35) * 0.08;
+    const bounce = Math.sin(timeRef.current * 3.1) * 0.045;
+
+    if (groupRef.current) {
+      const arrivalScale = arrived ? Math.max(0.05, 1 - timeRef.current * 0.95) : 1;
+      groupRef.current.position.y = 0.08 + bounce;
+      groupRef.current.scale.setScalar(pulse * arrivalScale);
+    }
 
     if (ringRef.current) {
-      // Gentle pulse
-      const pulse = 1 + Math.sin(timeRef.current * 2.5) * 0.08;
-      const arrivalFade = arrived
-        ? Math.max(0, 1 - timeRef.current * 0.8)
-        : Math.min(1, timeRef.current * 2);
-      const scale = pulse * (arrived ? 1 + timeRef.current * 0.5 : 1);
-
-      ringRef.current.scale.set(scale, scale, scale);
-      ringRef.current.material.opacity = arrivalFade * 0.5;
-      ringRef.current.rotation.y += delta * 0.3;
+      ringRef.current.material.opacity = fade * (minimal ? 0.45 : 0.55);
+      ringRef.current.rotation.z += delta * 0.18;
     }
 
     if (innerRef.current) {
-      const arrivalFade = arrived
-        ? Math.max(0, 1 - timeRef.current * 0.8)
-        : Math.min(1, timeRef.current * 2);
-      innerRef.current.material.opacity = arrivalFade * 0.25;
-      innerRef.current.rotation.y -= delta * 0.15;
+      innerRef.current.material.opacity = fade * (minimal ? 0.08 : 0.22);
+      innerRef.current.rotation.z -= delta * 0.1;
+    }
+
+    if (iconRef.current) {
+      iconRef.current.material.opacity = fade * (minimal ? 0 : 0.9);
+      iconRef.current.rotation.z = Math.sin(timeRef.current * 2.1) * 0.06;
     }
   });
 
@@ -157,12 +213,11 @@ function RuneRing({ position, arrived }) {
   }, [arrived]);
 
   return (
-    <group position={[position.x, position.y + 0.08, position.z]}>
-      {/* Outer ring */}
+    <group ref={groupRef}>
       <mesh ref={ringRef} rotation-x={-Math.PI / 2}>
-        <ringGeometry args={[0.6, 0.72, RUNE_SEGMENTS]} />
+        <ringGeometry args={[0.55, 0.74, RUNE_SEGMENTS]} />
         <meshBasicMaterial
-          color="#4ade80"
+          color={meta.primary}
           transparent
           opacity={0.5}
           side={THREE.DoubleSide}
@@ -170,67 +225,77 @@ function RuneRing({ position, arrived }) {
         />
       </mesh>
 
-      {/* Inner glow disc */}
       <mesh ref={innerRef} rotation-x={-Math.PI / 2}>
         <circleGeometry args={[0.55, RUNE_SEGMENTS]} />
         <meshBasicMaterial
-          color="#2dd4bf"
+          color={meta.glow}
           transparent
           opacity={0.25}
           side={THREE.DoubleSide}
           depthWrite={false}
         />
       </mesh>
+
+      {!minimal && (
+        <mesh ref={iconRef} rotation-x={-Math.PI / 2} position={[0, 0.025, 0]}>
+          {type === 'drink' || type === 'fish' ? (
+            <circleGeometry args={[0.22, 24]} />
+          ) : type === 'food' ? (
+            <circleGeometry args={[0.2, 5]} />
+          ) : type === 'rest' || type === 'shelter' ? (
+            <boxGeometry args={[0.42, 0.08, 0.28]} />
+          ) : type === 'hunt' ? (
+            <circleGeometry args={[0.16, 18]} />
+          ) : (
+            <circleGeometry args={[0.16, 3]} />
+          )}
+          <meshBasicMaterial
+            color={meta.glow}
+            transparent
+            opacity={0.9}
+            side={THREE.DoubleSide}
+            depthWrite={false}
+          />
+        </mesh>
+      )}
     </group>
   );
 }
 
-/* ── Dotted Path Line ── */
-function PathLine({ from, to }) {
-  const lineRef = useRef();
-
-  useFrame(() => {
-    if (!lineRef.current || !from || !to) return;
-
-    const points = [];
-    const steps = 20;
-    for (let i = 0; i <= steps; i++) {
-      const t = i / steps;
-      points.push(new THREE.Vector3(
-        THREE.MathUtils.lerp(from.x, to.x, t),
-        THREE.MathUtils.lerp(from.y, to.y, t) + 0.12,
-        THREE.MathUtils.lerp(from.z, to.z, t),
-      ));
-    }
-
-    lineRef.current.geometry.setFromPoints(points);
-  });
-
-  return (
-    <line ref={lineRef}>
-      <bufferGeometry />
-      <lineDashedMaterial
-        color="#4ade80"
-        transparent
-        opacity={0.35}
-        dashSize={0.3}
-        gapSize={0.2}
-        depthWrite={false}
-      />
-    </line>
-  );
-}
-
 /* ── Main Destination Marker Component ── */
-export default function DestinationMarker({ position, arrived = false, animalPosition }) {
+export default function DestinationMarker({
+  position,
+  arrived = false,
+  type = 'walk',
+  minimal = false,
+  feedback = null,
+}) {
+  const [hovered, setHovered] = useState(false);
   if (!position) return null;
+  const meta = getMarkerMeta(type);
 
   return (
-    <group>
-      <RuneRing position={position} arrived={arrived} />
-      <LeafParticles position={position} arrived={arrived} />
-      {animalPosition && !arrived && (
-        <PathLine from={animalPosition} to={position} />
+    <group
+      position={[position.x, position.y + 0.08, position.z]}
+      onPointerOver={(event) => {
+        event.stopPropagation();
+        setHovered(true);
+      }}
+      onPointerOut={() => setHovered(false)}
+    >
+      <NatureGlyph type={type} minimal={minimal} arrived={arrived} />
+      <LeafParticles arrived={arrived} color={meta.particle} />
+      {!minimal && !arrived && hovered && (
+        <Html center distanceFactor={18} position={[0, 1.05, 0]} className="wt-marker-tooltip">
+          <span>{meta.icon}</span>
+          <strong>{meta.label}</strong>
+          <small>{meta.detail}</small>
+        </Html>
+      )}
+      {feedback && arrived && (
+        <Html center distanceFactor={16} position={[0, 1.35, 0]} className="wt-marker-feedback">
+          {feedback}
+        </Html>
       )}
     </group>
   );

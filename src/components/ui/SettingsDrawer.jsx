@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useCallback } from 'react';
 
 /**
  * SettingsDrawer — Unified settings panel.
@@ -38,6 +38,8 @@ export default function SettingsDrawer({
   // Simulation
   simSpeed = 1,
   onSimSpeedChange,
+  minimalDestinationMarkers = false,
+  onMinimalDestinationMarkersChange,
 }) {
   const handleSettingChange = useCallback((key, value) => {
     onCameraSettingsChange?.({ ...cameraSettings, [key]: value });
@@ -150,6 +152,22 @@ export default function SettingsDrawer({
               </button>
             ))}
           </div>
+        </div>
+
+        {/* ── Accessibility ── */}
+        <div className="wt-settings-drawer__section">
+          <div className="wt-settings-drawer__section-title">Accessibility</div>
+          <label className="wt-settings-drawer__toggle">
+            <input
+              type="checkbox"
+              checked={minimalDestinationMarkers}
+              onChange={(event) => onMinimalDestinationMarkersChange?.(event.target.checked)}
+            />
+            <span className="wt-settings-drawer__toggle-control" aria-hidden="true" />
+            <span className="wt-settings-drawer__toggle-label">
+              Minimal destination rings
+            </span>
+          </label>
         </div>
       </div>
     </>

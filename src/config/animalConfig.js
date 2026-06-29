@@ -45,7 +45,7 @@ export const ANIMALS = {
       spine: 'Spine1',
     },
     // Base tint color for fur (applied as material.color)
-    furTint: '#d4b896',
+    furTint: '#8b6540',
     // Spawn position
     spawnPos: [-8, 0, 0],
     // Max obstacle height this species can step over (world units)
@@ -78,7 +78,7 @@ export const ANIMALS = {
       tail: 'Tail1',
       spine: 'Spine1',
     },
-    furTint: '#c4975a',
+    furTint: '#a86c38',
     spawnPos: [14, 0, -8],
     climbHeight: 0.45,
     decayRates: { energy: 0.0028, hydration: 0.0038, hunger: 0.0032 },
@@ -108,7 +108,7 @@ export const ANIMALS = {
       tail: ['Tail1', 'Tail'],
       spine: 'Spine1',
     },
-    furTint: '#4a3520',
+    furTint: '#3a2517',
     spawnPos: [-18, 0, 15],
     climbHeight: 0.60,
     decayRates: { energy: 0.0022, hydration: 0.0030, hunger: 0.0038 },
@@ -138,7 +138,7 @@ export const ANIMALS = {
       tail: ['Tail1', 'Tail'],
       spine: 'Spine1',
     },
-    furTint: '#c4652a',
+    furTint: '#b64f1d',
     spawnPos: [20, 0, 18],
     climbHeight: 0.35,
     decayRates: { energy: 0.0032, hydration: 0.0034, hunger: 0.0040 },
@@ -168,7 +168,7 @@ export const ANIMALS = {
       tail: ['Tail1', 'Tail'],
       spine: 'Spine1',
     },
-    furTint: '#a89070',
+    furTint: '#8f7964',
     spawnPos: [-10, 0, -15],
     climbHeight: 0.15,
     decayRates: { energy: 0.0035, hydration: 0.0040, hunger: 0.0036 },
@@ -231,19 +231,85 @@ export const ANIMAL_LIST = [
   ),
   withPersonality(
     createInstance(ANIMALS.deer, 'deer', 'Deer', randomSpawn('meadow')),
-    { displayName: 'Fern', gender: 'Female', age: '3 Years', weight: '68 kg', territory: 'East Meadow' }
+    {
+      displayName: 'Fern',
+      gender: 'Female',
+      age: '3 Years',
+      weight: '68 kg',
+      territory: 'East Meadow',
+      furTint: '#b47a3f',
+      furProfile: {
+        base: '#b47a3f',
+        highlight: '#e2bd78',
+        shadow: '#5a321b',
+        guard: '#2d1d12',
+        patch: '#f1d9ad',
+        patchAlpha: 0.2,
+        patchCount: 62,
+      },
+    }
   ),
   withPersonality(
     createInstance(ANIMALS.deer, 'deer-2', 'Deer 2', randomSpawn('meadow')),
-    { displayName: 'Birch', gender: 'Male', age: '4 Years', weight: '82 kg', territory: 'South Meadow' }
+    {
+      displayName: 'Birch',
+      gender: 'Male',
+      age: '4 Years',
+      weight: '82 kg',
+      territory: 'South Meadow',
+      furTint: '#7e4f2b',
+      furProfile: {
+        base: '#7e4f2b',
+        highlight: '#bd8750',
+        shadow: '#3b2415',
+        guard: '#20140c',
+        patch: '#cba26b',
+        patchAlpha: 0.13,
+        patchCount: 34,
+      },
+    }
   ),
   withPersonality(
     createInstance(ANIMALS.deer, 'deer-3', 'Deer 3', randomSpawn('meadow')),
-    { displayName: 'Willow', gender: 'Female', age: '2 Years', weight: '55 kg', territory: 'West Clearing' }
+    {
+      displayName: 'Willow',
+      gender: 'Female',
+      age: '2 Years',
+      weight: '55 kg',
+      territory: 'West Clearing',
+      furTint: '#c79a62',
+      furProfile: {
+        base: '#c79a62',
+        highlight: '#edd0a0',
+        shadow: '#684020',
+        guard: '#302013',
+        patch: '#f4dfb7',
+        patchAlpha: 0.24,
+        patchCount: 70,
+        belly: 'rgba(245,226,195,0.22)',
+      },
+    }
   ),
   withPersonality(
     createInstance(ANIMALS.deer, 'deer-4', 'Deer 4', randomSpawn('meadow')),
-    { displayName: 'Clover', gender: 'Female', age: '1 Year', weight: '42 kg', territory: 'Pond Edge' }
+    {
+      displayName: 'Clover',
+      gender: 'Female',
+      age: '1 Year',
+      weight: '42 kg',
+      territory: 'Pond Edge',
+      furTint: '#d2aa72',
+      furProfile: {
+        base: '#d2aa72',
+        highlight: '#f1dbad',
+        shadow: '#8b5a2e',
+        guard: '#4d321c',
+        patch: '#fff0c7',
+        patchAlpha: 0.32,
+        patchCount: 88,
+        belly: 'rgba(255,239,210,0.28)',
+      },
+    }
   ),
   withPersonality(
     createInstance(ANIMALS.bear, 'bear', 'Bear', randomSpawn('edge')),
@@ -255,19 +321,86 @@ export const ANIMAL_LIST = [
   ),
   withPersonality(
     createInstance(ANIMALS.rabbit, 'rabbit', 'Rabbit', randomSpawn()),
-    { displayName: 'Hazel', gender: 'Female', age: '1 Year', weight: '2.1 kg', territory: 'Meadow Burrow' }
+    {
+      displayName: 'Hazel',
+      gender: 'Female',
+      age: '1 Year',
+      weight: '2.1 kg',
+      territory: 'Meadow Burrow',
+      furTint: '#9a7b5d',
+      furProfile: {
+        base: '#9a7b5d',
+        highlight: '#d0b58f',
+        shadow: '#4e3c2f',
+        guard: '#2d241d',
+        patch: '#c5a982',
+        patchAlpha: 0.14,
+        patchCount: 12,
+      },
+    }
   ),
   withPersonality(
     createInstance(ANIMALS.rabbit, 'rabbit-2', 'Rabbit 2', randomSpawn()),
-    { displayName: 'Pip', gender: 'Male', age: '8 Months', weight: '1.8 kg', territory: 'Stream Bank' }
+    {
+      displayName: 'Pip',
+      gender: 'Male',
+      age: '8 Months',
+      weight: '1.8 kg',
+      territory: 'Stream Bank',
+      furTint: '#f1eee6',
+      furProfile: {
+        base: '#f1eee6',
+        highlight: '#ffffff',
+        shadow: '#c8c3b8',
+        guard: '#8b867c',
+        patch: '#ffffff',
+        patchAlpha: 0.08,
+        patchCount: 8,
+        belly: 'rgba(255,255,255,0.62)',
+      },
+    }
   ),
   withPersonality(
     createInstance(ANIMALS.rabbit, 'rabbit-3', 'Rabbit 3', randomSpawn()),
-    { displayName: 'Clementine', gender: 'Female', age: '1 Year', weight: '2.0 kg', territory: 'South Burrow' }
+    {
+      displayName: 'Clementine',
+      gender: 'Female',
+      age: '1 Year',
+      weight: '2.0 kg',
+      territory: 'South Burrow',
+      furTint: '#d8c7a7',
+      furProfile: {
+        base: '#d8c7a7',
+        highlight: '#f1e5c8',
+        shadow: '#8b6c49',
+        guard: '#5c4229',
+        patch: '#8d6040',
+        patchAlpha: 0.24,
+        patchCount: 24,
+        belly: 'rgba(255,244,221,0.42)',
+      },
+    }
   ),
   withPersonality(
     createInstance(ANIMALS.rabbit, 'rabbit-4', 'Rabbit 4', randomSpawn()),
-    { displayName: 'Thistle', gender: 'Male', age: '6 Months', weight: '1.5 kg', territory: 'Hill Burrow' }
+    {
+      displayName: 'Thistle',
+      gender: 'Male',
+      age: '6 Months',
+      weight: '1.5 kg',
+      territory: 'Hill Burrow',
+      furTint: '#5e5046',
+      furProfile: {
+        base: '#5e5046',
+        highlight: '#968879',
+        shadow: '#2f2925',
+        guard: '#171311',
+        patch: '#7d6f61',
+        patchAlpha: 0.18,
+        patchCount: 16,
+        belly: 'rgba(170,158,142,0.32)',
+      },
+    }
   ),
 ];
 

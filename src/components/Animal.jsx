@@ -15,22 +15,116 @@ import { WORLD_HALF, getPondRockPerchOffset, getTerrainHeight, isPondAt, isStrea
 const GRAZE_NECK_ANGLE = 1.4;
 const GRAZE_JAW_ANGLE = 0.2;
 const DRINK_NECK_ANGLE = 1.6;
-const SLEEP_BODY_LOWER = 0.32;
 const RABBIT_STREAM_LEAP_HEIGHT = 0.72;
 const FUR_TEXTURES = new Map();
+const FACIAL_MATERIALS = new Map();
 const _boneEuler = new THREE.Euler();
 const _boneQuat = new THREE.Quaternion();
+const _commandLook = new THREE.Vector3();
 
-function getFurDetailTexture(species) {
-  if (FUR_TEXTURES.has(species)) return FUR_TEXTURES.get(species);
+const FUR_PROFILES = {
+  moose: {
+    base: '#8b6540',
+    highlight: '#d0ad78',
+    shadow: '#3e2b1e',
+    guard: '#1f1712',
+    repeat: [4, 8],
+    bump: 0.018,
+    roughness: 0.92,
+    fiberStrength: 0.12,
+  },
+  deer: {
+    base: '#a86c38',
+    highlight: '#d8b172',
+    shadow: '#4b2e1a',
+    guard: '#2b1d12',
+    repeat: [5, 7],
+    bump: 0.016,
+    roughness: 0.9,
+    fiberStrength: 0.1,
+  },
+  bear: {
+    base: '#3a2517',
+    highlight: '#6f4b2f',
+    shadow: '#120d0a',
+    guard: '#0b0806',
+    repeat: [6, 9],
+    bump: 0.03,
+    roughness: 0.96,
+    fiberStrength: 0.18,
+  },
+  fox: {
+    base: '#b64f1d',
+    highlight: '#e18a43',
+    shadow: '#432316',
+    guard: '#21100a',
+    repeat: [5, 8],
+    bump: 0.02,
+    roughness: 0.9,
+    fiberStrength: 0.14,
+  },
+  rabbit: {
+    base: '#8f7964',
+    highlight: '#c4b29c',
+    shadow: '#4f4035',
+    guard: '#2c241f',
+    repeat: [7, 6],
+    bump: 0.018,
+    roughness: 0.94,
+    fiberStrength: 0.13,
+  },
+};
+
+const FACE_PROFILES = {
+  moose: {
+    eye: { offset: [0.16, 0.08, 0.34], size: 0.035 },
+    nose: { offset: [0, -0.1, 0.62], scale: [0.16, 0.07, 0.09] },
+    muzzle: { offset: [0, -0.13, 0.46], scale: [0.2, 0.08, 0.12], color: '#6d5139' },
+  },
+  deer: {
+    eye: { offset: [0.12, 0.07, 0.28], size: 0.026 },
+    nose: { offset: [0, -0.08, 0.48], scale: [0.1, 0.045, 0.06] },
+    muzzle: { offset: [0, -0.1, 0.36], scale: [0.14, 0.06, 0.09], color: '#d8c19d' },
+  },
+  bear: {
+    eye: { offset: [0.11, 0.08, 0.22], size: 0.03 },
+    nose: { offset: [0, -0.04, 0.42], scale: [0.16, 0.08, 0.1] },
+    muzzle: { offset: [0, -0.08, 0.31], scale: [0.2, 0.09, 0.12], color: '#7a5738' },
+  },
+  fox: {
+    eye: { offset: [0.08, 0.05, 0.2], size: 0.02 },
+    nose: { offset: [0, -0.035, 0.38], scale: [0.065, 0.035, 0.045] },
+    muzzle: { offset: [0, -0.06, 0.26], scale: [0.11, 0.045, 0.07], color: '#ecd8b5' },
+  },
+  rabbit: {
+    eye: { offset: [0.065, 0.055, 0.13], size: 0.018 },
+    nose: { offset: [0, -0.03, 0.27], scale: [0.045, 0.025, 0.035], color: '#2d1d1f' },
+    muzzle: { offset: [0, -0.045, 0.2], scale: [0.075, 0.035, 0.05], color: '#d9cabc' },
+  },
+};
+
+function getProfile(species, override = null) {
+  return {
+    ...(FUR_PROFILES[species] || FUR_PROFILES.deer),
+    ...(override || {}),
+  };
+}
+
+function getFurDetailTexture(textureKey, species, override = null) {
+  if (FUR_TEXTURES.has(textureKey)) return FUR_TEXTURES.get(textureKey);
   if (typeof document === 'undefined') return null;
+  const profile = getProfile(species, override);
+  const base = new THREE.Color(profile.base);
+  const highlight = new THREE.Color(profile.highlight);
+  const shadow = new THREE.Color(profile.shadow);
+  const guard = new THREE.Color(profile.guard);
 
   const canvas = document.createElement('canvas');
-  canvas.width = 128;
-  canvas.height = 128;
+  canvas.width = 256;
+  canvas.height = 256;
   const context = canvas.getContext('2d');
-  context.fillStyle = '#a8a8a8';
-  context.fillRect(0, 0, 128, 128);
+  context.fillStyle = profile.base;
+  context.fillRect(0, 0, 256, 256);
 
   let seed = [...species].reduce((sum, char) => sum + char.charCodeAt(0), 17);
   const random = () => {
@@ -38,27 +132,155 @@ function getFurDetailTexture(species) {
     return seed / 233280;
   };
 
-  for (let i = 0; i < 950; i++) {
-    const shade = 80 + Math.floor(random() * 150);
-    context.strokeStyle = `rgb(${shade}, ${shade}, ${shade})`;
-    context.globalAlpha = 0.18 + random() * 0.34;
-    context.lineWidth = 0.35 + random() * 0.75;
-    const x = random() * 128;
-    const y = random() * 128;
+  for (let y = 0; y < 256; y += 2) {
+    const mixColor = base.clone().lerp(random() > 0.52 ? highlight : shadow, 0.08 + random() * 0.14);
+    context.globalAlpha = 0.16;
+    context.strokeStyle = `#${mixColor.getHexString()}`;
     context.beginPath();
-    context.moveTo(x, y);
-    context.lineTo(x + (random() - 0.5) * 2.5, y + 2 + random() * 6);
+    context.moveTo(0, y + random() * 2);
+    context.lineTo(256, y + random() * 2);
     context.stroke();
   }
+
+  for (let i = 0; i < 2200; i++) {
+    const color = random() > 0.62 ? highlight : random() > 0.2 ? shadow : guard;
+    context.strokeStyle = `#${color.getHexString()}`;
+    context.globalAlpha = 0.12 + random() * 0.35;
+    context.lineWidth = 0.25 + random() * 0.9;
+    const x = random() * 256;
+    const y = random() * 256;
+    const length = 5 + random() * (species === 'bear' ? 16 : 10);
+    const curl = (random() - 0.5) * 6;
+    context.beginPath();
+    context.moveTo(x, y);
+    context.quadraticCurveTo(x + curl * 0.5, y + length * 0.55, x + curl, y + length);
+    context.stroke();
+  }
+
+  if (species === 'fox') {
+    context.globalAlpha = 0.34;
+    const belly = context.createLinearGradient(0, 120, 0, 256);
+    belly.addColorStop(0, 'rgba(255,245,220,0)');
+    belly.addColorStop(1, 'rgba(255,235,199,0.55)');
+    context.fillStyle = belly;
+    context.fillRect(0, 0, 256, 256);
+  }
+
+  if (species === 'deer' || species === 'moose') {
+    context.globalAlpha = profile.patchAlpha ?? (species === 'deer' ? 0.16 : 0.08);
+    context.fillStyle = profile.patch || '#f1d9ad';
+    for (let i = 0; i < (profile.patchCount ?? (species === 'deer' ? 52 : 24)); i++) {
+      const x = random() * 256;
+      const y = random() * 190;
+      context.beginPath();
+      context.ellipse(x, y, 1.8 + random() * 2.7, 1 + random() * 1.6, random() * Math.PI, 0, Math.PI * 2);
+      context.fill();
+    }
+
+    if (profile.belly) {
+      context.globalAlpha = 0.24;
+      const belly = context.createLinearGradient(0, 128, 0, 256);
+      belly.addColorStop(0, 'rgba(255,255,255,0)');
+      belly.addColorStop(1, profile.belly);
+      context.fillStyle = belly;
+      context.fillRect(0, 0, 256, 256);
+    }
+  }
+
+  if (species === 'rabbit') {
+    context.globalAlpha = profile.patchAlpha ?? 0.18;
+    context.fillStyle = profile.patch || profile.highlight;
+    const patchCount = profile.patchCount ?? 18;
+    for (let i = 0; i < patchCount; i++) {
+      const x = random() * 256;
+      const y = random() * 230;
+      const sx = 5 + random() * 18;
+      const sy = 3 + random() * 14;
+      context.beginPath();
+      context.ellipse(x, y, sx, sy, random() * Math.PI, 0, Math.PI * 2);
+      context.fill();
+    }
+
+    context.globalAlpha = profile.bellyAlpha ?? 0.22;
+    const belly = context.createLinearGradient(0, 120, 0, 256);
+    belly.addColorStop(0, 'rgba(255,255,255,0)');
+    belly.addColorStop(1, profile.belly || 'rgba(235,225,210,0.42)');
+    context.fillStyle = belly;
+    context.fillRect(0, 0, 256, 256);
+  }
+
   context.globalAlpha = 1;
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(5, 7);
-  texture.anisotropy = 4;
-  FUR_TEXTURES.set(species, texture);
+  texture.repeat.set(profile.repeat[0], profile.repeat[1]);
+  texture.anisotropy = 8;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  FUR_TEXTURES.set(textureKey, texture);
   return texture;
+}
+
+function getFaceMaterial(kind, color = '#080605') {
+  const key = `${kind}-${color}`;
+  if (FACIAL_MATERIALS.has(key)) return FACIAL_MATERIALS.get(key);
+  const material = new THREE.MeshStandardMaterial({
+    color,
+    roughness: kind === 'eye' ? 0.32 : 0.7,
+    metalness: 0,
+    envMapIntensity: kind === 'eye' ? 0.7 : 0.18,
+  });
+  FACIAL_MATERIALS.set(key, material);
+  return material;
+}
+
+function createFacialAccents(species) {
+  const profile = FACE_PROFILES[species];
+  if (!profile) return [];
+  const accents = [];
+  const eyeGeometry = new THREE.SphereGeometry(profile.eye.size, 10, 8);
+  const eyeMaterial = getFaceMaterial('eye');
+  const glossMaterial = getFaceMaterial('eye-gloss', '#f7f1df');
+  const noseMaterial = getFaceMaterial('nose', profile.nose.color || '#080605');
+  const muzzleMaterial = getFaceMaterial('muzzle', profile.muzzle.color);
+
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+    eye.name = `wildlife-${species}-eye-${side}`;
+    eye.position.set(profile.eye.offset[0] * side, profile.eye.offset[1], profile.eye.offset[2]);
+    eye.castShadow = false;
+    accents.push(eye);
+
+    const glint = new THREE.Mesh(
+      new THREE.SphereGeometry(profile.eye.size * 0.28, 8, 6),
+      glossMaterial
+    );
+    glint.name = `wildlife-${species}-eye-glint-${side}`;
+    glint.position.set(
+      profile.eye.offset[0] * side - profile.eye.size * 0.2 * side,
+      profile.eye.offset[1] + profile.eye.size * 0.28,
+      profile.eye.offset[2] + profile.eye.size * 0.55
+    );
+    glint.castShadow = false;
+    accents.push(glint);
+  }
+
+  const muzzle = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), muzzleMaterial);
+  muzzle.name = `wildlife-${species}-muzzle`;
+  muzzle.position.set(...profile.muzzle.offset);
+  muzzle.scale.set(...profile.muzzle.scale);
+  muzzle.castShadow = false;
+  muzzle.receiveShadow = true;
+  accents.push(muzzle);
+
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), noseMaterial);
+  nose.name = `wildlife-${species}-nose`;
+  nose.position.set(...profile.nose.offset);
+  nose.scale.set(...profile.nose.scale);
+  nose.castShadow = false;
+  accents.push(nose);
+
+  return accents;
 }
 
 /* ========================================
@@ -83,71 +305,87 @@ function smoothstep(t) {
    Material enhancement — fur tint + shader
    ======================================== */
 function enhanceMaterials(root, config) {
-  const furDetail = getFurDetailTexture(config.species || config.id);
+  const species = config.species || config.id;
+  const textureKey = config.furProfile ? `${species}-${config.id}` : species;
+  const profile = getProfile(species, config.furProfile);
+  const furDetail = getFurDetailTexture(textureKey, species, config.furProfile);
   root.traverse((child) => {
     if (!child.isMesh) return;
     child.castShadow = true;
     child.receiveShadow = true;
 
-    const mat = child.material;
-    if (!mat) return;
-
-    if (config.bodyMaterials.includes(mat.name)) {
-      mat.color.set(config.furTint);
-      mat.roughness = 0.88;
-      mat.metalness = 0.0;
-      mat.envMapIntensity = 0.25;
-      if (mat.normalScale) mat.normalScale.set(1.35, 1.35);
-      if (furDetail) {
-        if (!mat.bumpMap) mat.bumpMap = furDetail;
-        mat.bumpScale = 0.022;
-        if (!mat.roughnessMap) mat.roughnessMap = furDetail;
-      }
-
-      mat.onBeforeCompile = (shader) => {
-        shader.vertexShader = shader.vertexShader.replace(
-          '#include <common>',
-          `#include <common>
-          varying vec3 vWorldNormal;
-          varying vec3 vWorldPos;`
-        );
-        shader.vertexShader = shader.vertexShader.replace(
-          '#include <worldpos_vertex>',
-          `#include <worldpos_vertex>
-          vWorldNormal = normalize(mat3(modelMatrix) * normal);
-          vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;`
-        );
-        shader.fragmentShader = shader.fragmentShader.replace(
-          '#include <common>',
-          `#include <common>
-          varying vec3 vWorldNormal;
-          varying vec3 vWorldPos;`
-        );
-        shader.fragmentShader = shader.fragmentShader.replace(
-          '#include <dithering_fragment>',
-          `vec3 viewDir = normalize(cameraPosition - vWorldPos);
-          float rim = 1.0 - max(dot(viewDir, vWorldNormal), 0.0);
-          rim = pow(rim, 2.0) * 0.5;
-          gl_FragColor.rgb += vec3(0.4, 0.28, 0.12) * rim;
-          float n1 = fract(sin(dot(vWorldPos.xz * 160.0, vec2(12.9898, 78.233))) * 43758.5453);
-          float fibers = pow(abs(sin(vWorldPos.y * 210.0 + n1 * 8.0)), 9.0);
-          gl_FragColor.rgb *= 0.86 + n1 * 0.16 + fibers * 0.08;
-          float ao = pow(max(dot(vWorldNormal, vec3(0.0, 1.0, 0.0)), 0.0), 0.5);
-          gl_FragColor.rgb *= 0.7 + ao * 0.3;
-          float backLight = pow(1.0 - abs(dot(viewDir, vWorldNormal)), 3.0);
-          gl_FragColor.rgb += vec3(0.18, 0.11, 0.05) * backLight;
-          #include <dithering_fragment>`
-        );
-      };
-      mat.customProgramCacheKey = () => `wildlife-fur-${config.species || config.id}`;
-      mat.needsUpdate = true;
+    if (!child.userData.wildTrailsMaterialClone) {
+      child.material = Array.isArray(child.material)
+        ? child.material.map((material) => material?.clone?.() || material)
+        : child.material?.clone?.() || child.material;
+      child.userData.wildTrailsMaterialClone = true;
     }
 
-    if (config.antlerMaterials.includes(mat.name)) {
-      mat.color.set('#8a7458');
-      mat.roughness = 0.82;
-      mat.metalness = 0.03;
-      mat.needsUpdate = true;
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+    for (const mat of materials) {
+      if (!mat) continue;
+
+      if (config.bodyMaterials.includes(mat.name)) {
+        mat.color.set(config.furTint || profile.base);
+        mat.roughness = profile.roughness;
+        mat.metalness = 0.0;
+        mat.envMapIntensity = 0.2;
+        if (mat.normalScale) mat.normalScale.set(1.45, 1.45);
+        if (furDetail) {
+          mat.map = furDetail;
+          mat.bumpMap = furDetail;
+          mat.bumpScale = profile.bump;
+          mat.roughnessMap = furDetail;
+        }
+
+        mat.onBeforeCompile = (shader) => {
+          shader.vertexShader = shader.vertexShader.replace(
+            '#include <common>',
+            `#include <common>
+            varying vec3 vWorldNormal;
+            varying vec3 vWorldPos;`
+          );
+          shader.vertexShader = shader.vertexShader.replace(
+            '#include <worldpos_vertex>',
+            `#include <worldpos_vertex>
+            vWorldNormal = normalize(mat3(modelMatrix) * normal);
+            vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;`
+          );
+          shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <common>',
+            `#include <common>
+            varying vec3 vWorldNormal;
+            varying vec3 vWorldPos;`
+          );
+          shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <dithering_fragment>',
+            `vec3 viewDir = normalize(cameraPosition - vWorldPos);
+            float rim = 1.0 - max(dot(viewDir, vWorldNormal), 0.0);
+            rim = pow(rim, 2.2) * 0.42;
+            gl_FragColor.rgb += vec3(0.38, 0.28, 0.16) * rim;
+            float strandNoise = fract(sin(dot(vWorldPos.xz * 170.0, vec2(12.9898, 78.233))) * 43758.5453);
+            float fiberMask = pow(abs(sin(vWorldPos.y * 230.0 + strandNoise * 9.0)), 9.0);
+            gl_FragColor.rgb *= 0.82 + strandNoise * 0.18 + fiberMask * ${profile.fiberStrength.toFixed(3)};
+            float topLight = pow(max(dot(vWorldNormal, vec3(0.0, 1.0, 0.0)), 0.0), 0.55);
+            float underside = 1.0 - topLight;
+            gl_FragColor.rgb *= 0.68 + topLight * 0.34;
+            gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * vec3(0.62, 0.55, 0.48), underside * 0.16);
+            float backLight = pow(1.0 - abs(dot(viewDir, vWorldNormal)), 3.0);
+            gl_FragColor.rgb += vec3(0.16, 0.11, 0.06) * backLight;
+            #include <dithering_fragment>`
+          );
+        };
+        mat.customProgramCacheKey = () => `wildlife-fur-${textureKey}`;
+        mat.needsUpdate = true;
+      }
+
+      if (config.antlerMaterials.includes(mat.name)) {
+        mat.color.set(species === 'deer' ? '#9b8060' : '#80694d');
+        mat.roughness = 0.88;
+        mat.metalness = 0.02;
+        mat.envMapIntensity = 0.12;
+        mat.needsUpdate = true;
+      }
     }
   });
 }
@@ -227,6 +465,7 @@ export default function Animal({
   const tailBone = useRef(null);
   const spineBone = useRef(null);
   const boneBaseQuats = useRef(new Map());
+  const facialAccents = useRef([]);
 
   // AI + Stats
   const animalAI = useAnimalAI(config.diet, config.species || config.id, config.id);
@@ -236,9 +475,12 @@ export default function Animal({
   const movementSource = useRef(null);
   const movementSpeed = useRef(config.walkSpeed);
   const urgentNeed = useRef(null);
+  const userStartTimer = useRef(null);
+  const commandLookTarget = useRef(null);
   const collisionRadius = config.collisionRadius || 0.8;
   const species = config.species || config.id;
   const isRabbit = species === 'rabbit';
+  const isSmallAnimal = species === 'rabbit' || species === 'fox';
   const footSink = isRabbit ? 0.018 : 0.04;
 
   // User command tracking — use a serial number so every new click fires
@@ -290,6 +532,21 @@ export default function Animal({
       if (child.isBone) boneBaseQuats.current.set(child.uuid, child.quaternion.clone());
     });
   }, [clonedScene, config.bones]);
+
+  useEffect(() => {
+    const head = headBone.current;
+    if (!head) return undefined;
+    facialAccents.current.forEach((accent) => accent.removeFromParent());
+    facialAccents.current = createFacialAccents(config.species || config.id);
+    facialAccents.current.forEach((accent) => head.add(accent));
+    return () => {
+      facialAccents.current.forEach((accent) => {
+        accent.geometry?.dispose?.();
+        accent.removeFromParent();
+      });
+      facialAccents.current = [];
+    };
+  }, [clonedScene, config.id, config.species]);
 
   const setBoneRot = useCallback((bone, axis, angle) => {
     if (!bone) return;
@@ -371,7 +628,7 @@ export default function Animal({
   const { climbingRef, climbIntensity } = useAnimalMovement(groupRef, activeDest, {
     moveSpeed: () => movementSpeed.current,
     collisionRadius,
-    streamSpeedMultiplier: isRabbit ? 1.12 : 0.68,
+    streamSpeedMultiplier: isSmallAnimal ? 1.05 : 0.72,
     climbHeight: config.climbHeight || 0.3,
     selfId: config.id,
     onArrive: handleArrive,
@@ -384,6 +641,7 @@ export default function Animal({
     if (!userDestination || !destinationSerial) return;
     if (destinationSerial === prevSerial.current) return;
     prevSerial.current = destinationSerial;
+    if (userStartTimer.current) clearTimeout(userStartTimer.current);
 
     const dest = userDestination.clone();
     dest.x = THREE.MathUtils.clamp(dest.x, -WORLD_HALF, WORLD_HALF);
@@ -400,17 +658,30 @@ export default function Animal({
 
     movementSource.current = 'user';
     movementSpeed.current = isRunning ? config.runSpeed : config.walkSpeed;
-    setActiveDest(dest);
-    playWalk(isRunning);
+    commandLookTarget.current = dest.clone();
+    setActiveDest(null);
+    playIdle();
+    userStartTimer.current = setTimeout(() => {
+      commandLookTarget.current = null;
+      setActiveDest(dest);
+      playWalk(isRunning);
+      userStartTimer.current = null;
+    }, 420);
   }, [
     destinationSerial,
     userDestination,
     isRunning,
+    playIdle,
     playWalk,
     animalAI,
     config.runSpeed,
     config.walkSpeed,
   ]);
+
+  useEffect(() => () => {
+    if (userStartTimer.current) clearTimeout(userStartTimer.current);
+    commandLookTarget.current = null;
+  }, []);
 
   // Forced behavior from UI buttons
   useEffect(() => {
@@ -435,6 +706,15 @@ export default function Animal({
   useFrame((_, delta) => {
     if (!groupRef.current) return;
     const pos = groupRef.current.position;
+
+    if (commandLookTarget.current && headBone.current) {
+      _commandLook.copy(commandLookTarget.current).sub(pos).setY(0);
+      if (_commandLook.lengthSq() > 0.01) {
+        _commandLook.normalize();
+        const yaw = Math.atan2(_commandLook.x, _commandLook.z) - groupRef.current.rotation.y;
+        setBoneRot(headBone.current, 'y', THREE.MathUtils.clamp(yaw * 0.22, -0.32, 0.32));
+      }
+    }
 
     // The deep pond stays blocked; the shallow stream is intentionally passable.
     if (isPondAt(pos.x, pos.z, 0.15)) {
@@ -530,8 +810,8 @@ export default function Animal({
     const doGraze = (ai.shouldGraze || ai.shouldHunt) && !hasActiveMovement;
     const doDrink = ai.shouldDrink && !hasActiveMovement;
     const doSleep = ai.shouldSleep && !hasActiveMovement;
-    const doIdle = !doGraze && !doDrink && !doSleep && idle;
-    const doStreamLeap = isRabbit && hasActiveMovement && isStreamAt(pos.x, pos.z, 0.9);
+    const doIdle = !commandLookTarget.current && !doGraze && !doDrink && !doSleep && idle;
+    const doStreamLeap = isSmallAnimal && hasActiveMovement && isStreamAt(pos.x, pos.z, 0.9);
 
     if (doStreamLeap) {
       leapPhase.current += delta * 5.4;
@@ -618,11 +898,10 @@ export default function Animal({
       setBoneRot(jawBone.current, 'x', jawAngle);
     }
 
-    // SLEEPING — sit on terrain, no floating
+    // SLEEPING — keep the root and visible body above terrain.
     if (doSleep) {
       const settleT = Math.min(1, phase / 2.5);
       const easeT = smoothstep(settleT);
-      // Keep body ON the ground — never go below terrain
       pos.y = terrainY.current;
       setNeckBend(0.4 * easeT, 0.7);
       setBoneRot(spineBone.current, 'x', Math.sin(phase * 0.8) * 0.018);
@@ -632,7 +911,8 @@ export default function Animal({
     // Lower and softly lean the visible model while sleeping or climbing.
     // The root stays terrain-locked, so waking/stopping never causes hovering.
     if (presentationRef.current) {
-      const targetLower = doSleep ? -SLEEP_BODY_LOWER : 0;
+      const restLift = doSleep ? (isRabbit ? 0.045 : 0.075) : 0;
+      const targetLower = restLift;
       const targetY = targetLower + leapOffset.current;
 
       // Climbing tilt: lean forward slightly when stepping over rocks

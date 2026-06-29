@@ -40,11 +40,17 @@ export default function Terrain({ onClick, onDoubleClick }) {
       receiveShadow
       onClick={(event) => {
         event.stopPropagation();
-        onClick?.(event.point.clone());
+        onClick?.(event.point.clone(), {
+          x: event.nativeEvent?.clientX ?? window.innerWidth / 2,
+          y: event.nativeEvent?.clientY ?? window.innerHeight / 2,
+        });
       }}
       onDoubleClick={(event) => {
         event.stopPropagation();
-        onDoubleClick?.(event.point.clone());
+        onDoubleClick?.(event.point.clone(), {
+          x: event.nativeEvent?.clientX ?? window.innerWidth / 2,
+          y: event.nativeEvent?.clientY ?? window.innerHeight / 2,
+        });
       }}
     >
       <meshStandardMaterial vertexColors roughness={0.94} metalness={0} />
