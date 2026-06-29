@@ -55,12 +55,12 @@ export const ANIMALS = {
     diet: DIET.HERBIVORE,
     scale: 1.0,
     walkSpeed: 3.0,
-    runSpeed: 6.0,
-    walkTimescale: 1.0,
-    runTimescale: 1.8,
+    runSpeed: 8.5,           // deer are fast
+    walkTimescale: 1.1,
+    runTimescale: 2.6,       // fast gallop timescale
     anims: {
       idle: 'Idle',
-      walk: 'WalkFast_F',
+      walk: 'WalkFast_F',    // gallop uses the fast walk anim at high timescale
     },
     bodyMaterials: ['M_Deer'],
     antlerMaterials: ['M_DeerAntler'],

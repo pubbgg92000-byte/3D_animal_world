@@ -12,7 +12,7 @@ import Trees from './components/Trees';
 import TallGrass from './components/TallGrass';
 import WaterPools from './components/WaterPools';
 import Fish from './components/Fish';
-import Pond from './components/Pond';
+import Pond, { PondStream } from './components/Pond';
 import SmallPrey from './components/SmallPrey';
 import Sky from './components/Sky';
 import FloatingParticles from './components/FloatingParticles';
@@ -212,6 +212,7 @@ export default function App() {
         <TallGrass />
         <WaterPools />
         <Pond />
+        <PondStream />
         <Fish />
         <SmallPrey />
         <FloatingParticles />

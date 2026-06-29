@@ -1,0 +1,112 @@
+import * as THREE from 'three';
+
+export const WORLD_SIZE = 120;
+export const WORLD_HALF = WORLD_SIZE / 2 - 2;
+
+export const POND_X = 0;
+export const POND_Z = 5;
+export const POND_RADIUS = 5.5;
+export const POND_WATER_Y = 0.05;
+
+export const STREAM_START_Z = POND_Z + POND_RADIUS;
+export const STREAM_END_Z = 55;
+
+export function baseTerrainHeight(x, z) {
+  const h1 = Math.sin(x * 0.04) * Math.cos(z * 0.052);
+  const h2 = Math.sin(x * 0.084 + 1.7) * Math.cos(z * 0.068 + 0.5);
+  return (h1 * 0.6 + h2 * 0.4) * 1.2;
+}
+
+export function streamCenterX(z) {
+  const t = THREE.MathUtils.clamp(
+    (z - STREAM_START_Z) / (STREAM_END_Z - STREAM_START_Z),
+    0,
+    1
+  );
+  return Math.sin(t * Math.PI * 3.2) * 0.65;
+}
+
+export function streamHalfWidth(z) {
+  const t = THREE.MathUtils.clamp(
+    (z - STREAM_START_Z) / (STREAM_END_Z - STREAM_START_Z),
+    0,
+    1
+  );
+  return THREE.MathUtils.lerp(1.25, 0.6, t);
+}
+
+function smoothstep(t) {
+  const v = THREE.MathUtils.clamp(t, 0, 1);
+  return v * v * (3 - 2 * v);
+}
+
+/** Ground height shared by terrain, animals, vegetation, trees, and AI. */
+export function getTerrainHeight(x, z) {
+  let y = baseTerrainHeight(x, z);
+
+  const pondDistance = Math.hypot(x - POND_X, z - POND_Z);
+  if (pondDistance < POND_RADIUS) {
+    const blend = smoothstep(pondDistance / POND_RADIUS);
+    y = THREE.MathUtils.lerp(-1.6, y, blend);
+  }
+
+  if (z >= STREAM_START_Z && z <= STREAM_END_Z) {
+    const center = streamCenterX(z);
+    const halfWidth = streamHalfWidth(z) + 0.45;
+    const distance = Math.abs(x - center);
+    if (distance < halfWidth) {
+      const blend = smoothstep(distance / halfWidth);
+      y = THREE.MathUtils.lerp(-0.18, y, blend);
+    }
+  }
+
+  return y;
+}
+
+export function isWaterAt(x, z, margin = 0) {
+  if (Math.hypot(x - POND_X, z - POND_Z) < POND_RADIUS - 0.35 + margin) {
+    return true;
+  }
+  if (z < STREAM_START_Z || z > STREAM_END_Z) return false;
+  return Math.abs(x - streamCenterX(z)) < streamHalfWidth(z) + margin;
+}
+
+export function clampToWorld(point, padding = 1.5) {
+  point.x = THREE.MathUtils.clamp(point.x, -WORLD_HALF + padding, WORLD_HALF - padding);
+  point.z = THREE.MathUtils.clamp(point.z, -WORLD_HALF + padding, WORLD_HALF - padding);
+  point.y = getTerrainHeight(point.x, point.z);
+  return point;
+}
+
+/** Dry stream-bank destinations animals can safely reach to drink. */
+export function createWaterApproachPoints() {
+  const points = [];
+  for (const z of [17, 27, 38, 49]) {
+    const center = streamCenterX(z);
+    const bank = streamHalfWidth(z) + 1.05;
+    for (const side of [-1, 1]) {
+      const x = center + side * bank;
+      points.push(new THREE.Vector3(x, getTerrainHeight(x, z), z));
+    }
+  }
+  return points;
+}
+
+export function randomDryPoint(center, radius, attempts = 16) {
+  for (let i = 0; i < attempts; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const distance = Math.sqrt(Math.random()) * radius;
+    const point = clampToWorld(
+      new THREE.Vector3(
+        center.x + Math.cos(angle) * distance,
+        0,
+        center.z + Math.sin(angle) * distance
+      )
+    );
+    if (!isWaterAt(point.x, point.z, 0.5)) return point;
+  }
+
+  const fallback = clampToWorld(center.clone());
+  if (isWaterAt(fallback.x, fallback.z, 0.5)) fallback.x += POND_RADIUS + 2;
+  return clampToWorld(fallback);
+}

@@ -21,7 +21,7 @@ function getTerrainHeight(x, z) {
    ======================================== */
 
 const PREY_COUNT = 12;
-const SPREAD = 45;
+const SPREAD = 30;
 
 function seededRandom(seed) {
   let s = seed;

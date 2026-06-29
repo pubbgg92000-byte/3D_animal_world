@@ -185,6 +185,9 @@ export default function Animal({
   const actionsReady = useRef(false);
   const terrainY = useRef(0);
   const behaviorPhase = useRef(0);
+  const lastPosition = useRef(new THREE.Vector3());
+  const stillTimer = useRef(0);
+  const wasMoving = useRef(false);
 
   // Bones
   const neckBones = useRef([]);
@@ -219,6 +222,7 @@ export default function Animal({
       const y = getTerrainHeight(x, z);
       groupRef.current.position.set(x, y, z);
       terrainY.current = y;
+      lastPosition.current.set(x, y, z); // seed so frame-0 delta is zero
     }
   }, [config.spawnPos]);
 
@@ -272,6 +276,8 @@ export default function Animal({
       currentAnim.current = crossFadeToAnim(
         actions, currentAnim.current, config.anims.walk, 0.3, ts
       );
+      wasMoving.current = true;
+      stillTimer.current = 0;
       setIdle(false);
     },
     [actions, config.anims.walk, config.walkTimescale, config.runTimescale]
@@ -350,6 +356,36 @@ export default function Animal({
     registerAnimal(config.id, pos);
 
     onPositionUpdate?.(config.id, pos);
+
+    // ── Detect real-world movement to stop legs when truly stationary ──
+    // Only check for stillness when there's no active destination (animal is
+    // truly supposed to be idle). When moving to a destination, trust the
+    // walk animation and only return to idle on actual arrival.
+    const movedDist = pos.distanceTo(lastPosition.current);
+    lastPosition.current.copy(pos);
+
+    if (activeDest === null) {
+      // No destination — if we were moving before, check if we've stopped
+      if (wasMoving.current) {
+        if (movedDist < 0.005) {
+          stillTimer.current += delta;
+        } else {
+          stillTimer.current = 0;
+        }
+        // Switch to idle anim after 0.3s of no movement while supposedly idle
+        if (stillTimer.current > 0.3 && actionsReady.current) {
+          wasMoving.current = false;
+          stillTimer.current = 0;
+          currentAnim.current = crossFadeToAnim(actions, currentAnim.current, config.anims.idle, 0.25);
+          setIdle(true);
+        }
+      }
+    } else {
+      // Has a destination — reset still tracking; animation is managed by
+      // playWalk/playIdle/handleArrive
+      stillTimer.current = 0;
+      if (movedDist > 0.005) wasMoving.current = true;
+    }
 
     // AI + Stats — forcedBehavior only if no user destination active
     const hasUserDest = activeDest !== null;

@@ -66,16 +66,23 @@ export default function Ground({ onClick, onDoubleClick }) {
     );
     geo.rotateX(-Math.PI / 2);
 
-    // Pool depression specs — must match WaterPools.jsx POOL_SPECS
+    // Only the main pond depression — extra pools removed
     const DEPRESSIONS = [
-      { x: 0,   z: 5,   r: 5.5,  depth: 1.6  }, // main pond
-      { x: 12,  z: 8,   r: 3.0,  depth: 0.55 },
-      { x: -15, z: 12,  r: 2.5,  depth: 0.50 },
-      { x: 20,  z: -10, r: 3.5,  depth: 0.60 },
-      { x: -8,  z: -18, r: 2.8,  depth: 0.52 },
-      { x: 25,  z: 22,  r: 2.2,  depth: 0.48 },
-      { x: -22, z: -8,  r: 3.0,  depth: 0.55 },
+      { x: 0,  z: 5,  r: 5.5, depth: 1.6 }, // main pond
     ];
+
+    // Stream channel — shallow trough from pond south edge to world boundary
+    // We'll handle it as a series of overlapping circular depressions
+    const streamStartZ = 10.5;
+    const streamEndZ   = 38.5;
+    const streamSegs   = 22;
+    for (let i = 0; i <= streamSegs; i++) {
+      const t  = i / streamSegs;
+      const sz = streamStartZ + t * (streamEndZ - streamStartZ);
+      const sx = Math.sin(t * Math.PI * 2.5) * 0.3; // gentle meander
+      const r  = 1.6 - t * 0.5;  // taper width
+      DEPRESSIONS.push({ x: sx, z: sz, r, depth: 0.18 });
+    }
 
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
@@ -111,16 +118,18 @@ export default function Ground({ onClick, onDoubleClick }) {
       const x = (seededRandom(i * 3 + 0.1) * 2 - 1) * halfSize;
       const z = (seededRandom(i * 3 + 0.2) * 2 - 1) * halfSize;
 
-      // Skip grass inside pond or water pool areas
+      // Skip grass inside pond or stream areas
       const GRASS_EXCLUSIONS = [
-        { x: 0,   z: 5,   r: 6.5  },
-        { x: 12,  z: 8,   r: 4.0  },
-        { x: -15, z: 12,  r: 3.5  },
-        { x: 20,  z: -10, r: 4.5  },
-        { x: -8,  z: -18, r: 3.8  },
-        { x: 25,  z: 22,  r: 3.2  },
-        { x: -22, z: -8,  r: 4.0  },
+        { x: 0,  z: 5,  r: 6.5 }, // main pond
       ];
+      // Also exclude along the stream corridor
+      const streamT = Math.max(0, Math.min(1, (z - 10.5) / 28));
+      const streamX = Math.sin(streamT * Math.PI * 2.5) * 0.3;
+      const streamDist = Math.sqrt((x - streamX) ** 2);
+      const streamW = 2.0 - streamT * 0.5;
+      if (z >= 10.5 && z <= 38.5 && streamDist < streamW) {
+        continue;
+      }
       let inWater = false;
       for (const ex of GRASS_EXCLUSIONS) {
         const dx = x - ex.x, dz = z - ex.z;
