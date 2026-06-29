@@ -157,7 +157,7 @@ function FishInstance({ centerX, centerZ, centerY, pondRadius, index, seed }) {
       <primitive
         object={clonedScene}
         scale={modelScale}
-        rotation={[0, 0, 0]}
+        rotation={[0, Math.PI, 0]}
         position={[0, -0.05, 0]}
       />
     </group>
