@@ -72,7 +72,7 @@ export default function LoadingScreen({ entered = false, onEnter }) {
   useEffect(() => {
     if (progress >= 98 && !dissolving) {
       setDissolving(true);
-      const timer = setTimeout(() => setShow(false), 1400);
+      const timer = setTimeout(() => setShow(false), 250);
       return () => clearTimeout(timer);
     }
   }, [progress, dissolving]);
