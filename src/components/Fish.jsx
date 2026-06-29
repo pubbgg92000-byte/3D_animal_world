@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { useAnimations, useGLTF } from '@react-three/drei';
+import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { POND_POSITION, POND_RADIUS } from './Pond';
@@ -22,6 +22,7 @@ function seededRng(seed) {
 
 function FishInstance({ centerX, centerZ, centerY, pondRadius, index, seed }) {
   const groupRef  = useRef();
+  const mixerRef  = useRef(null);
   const posRef    = useRef(new THREE.Vector3());
   const velRef    = useRef(new THREE.Vector3());
   const targetRef = useRef(new THREE.Vector3());
@@ -33,7 +34,24 @@ function FishInstance({ centerX, centerZ, centerY, pondRadius, index, seed }) {
       if (!child.isMesh) return;
       child.castShadow = true;
       child.receiveShadow = false;
-      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      const sourceMaterials = Array.isArray(child.material) ? child.material : [child.material];
+      const materials = sourceMaterials.map((source) => {
+        if (!source) return source;
+        if (source.isMeshBasicMaterial) {
+          return new THREE.MeshStandardMaterial({
+            map: source.map || null,
+            color: source.color?.clone?.() || new THREE.Color('#75d9d0'),
+            roughness: 0.72,
+            metalness: 0.02,
+            transparent: source.transparent,
+            opacity: source.opacity,
+            alphaMap: source.alphaMap || null,
+            side: THREE.DoubleSide,
+          });
+        }
+        return source.clone();
+      });
+      child.material = Array.isArray(child.material) ? materials : materials[0];
       for (const material of materials) {
         if (!material) continue;
         material.side = THREE.DoubleSide;
@@ -45,7 +63,6 @@ function FishInstance({ centerX, centerZ, centerY, pondRadius, index, seed }) {
     });
     return clone;
   }, [scene]);
-  const { actions } = useAnimations(animations, clonedScene);
 
   // Per-fish constants
   const swimDepth = useMemo(() => POND_WATER_Y - 0.34 - (seed % 4) * 0.045, [seed]);
@@ -54,18 +71,22 @@ function FishInstance({ centerX, centerZ, centerY, pondRadius, index, seed }) {
   const modelTilt = useMemo(() => (index % 2 === 0 ? -0.05 : 0.04), [index]);
 
   useEffect(() => {
-    const actionList = Object.values(actions).filter(Boolean);
+    const mixer = new THREE.AnimationMixer(clonedScene);
+    mixerRef.current = mixer;
+    const actionList = animations.map((clip) => mixer.clipAction(clip, clonedScene));
     for (const action of actionList) {
-      action.reset();
-      action.setLoop(THREE.LoopRepeat);
-      action.timeScale = 0.78 + (seed % 6) * 0.08;
+      action.setLoop(THREE.LoopRepeat, Infinity);
+      action.enabled = true;
+      action.timeScale = 0.9 + (seed % 6) * 0.1;
       action.play();
       action.time = ((seed % 23) / 23) * Math.max(0.1, action.getClip().duration);
     }
     return () => {
-      for (const action of actionList) action.stop();
+      mixer.stopAllAction();
+      mixer.uncacheRoot(clonedScene);
+      mixerRef.current = null;
     };
-  }, [actions, seed]);
+  }, [animations, clonedScene, seed]);
 
   // Pick initial random position inside pond
   useMemo(() => {
@@ -83,6 +104,7 @@ function FishInstance({ centerX, centerZ, centerY, pondRadius, index, seed }) {
 
   useFrame((_, delta) => {
     if (!groupRef.current) return;
+    mixerRef.current?.update(delta);
 
     timerRef.current -= delta;
 
@@ -125,7 +147,7 @@ function FishInstance({ centerX, centerZ, centerY, pondRadius, index, seed }) {
 
     // Face movement direction
     if (velRef.current.lengthSq() > 0.0001) {
-      groupRef.current.rotation.y = Math.atan2(-velRef.current.z, velRef.current.x);
+      groupRef.current.rotation.y = Math.atan2(velRef.current.x, velRef.current.z);
     }
     groupRef.current.rotation.x = modelTilt + Math.sin(timerRef.current * 2.1 + index) * 0.035;
   });
@@ -135,7 +157,7 @@ function FishInstance({ centerX, centerZ, centerY, pondRadius, index, seed }) {
       <primitive
         object={clonedScene}
         scale={modelScale}
-        rotation={[0, Math.PI, 0]}
+        rotation={[0, 0, 0]}
         position={[0, -0.05, 0]}
       />
     </group>
