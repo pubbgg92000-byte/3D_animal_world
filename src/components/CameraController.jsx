@@ -113,6 +113,7 @@ function springFactor(spring, delta) {
  */
 export default function CameraController({
   targetPosition,
+  focusKey = null,
   mode = 'follow',
   mooseState = 'Idle',
   fov = 45,
@@ -124,6 +125,7 @@ export default function CameraController({
   const isTransitioning = useRef(false);
   const userControlUntil = useRef(0);
   const prevMode = useRef(mode);
+  const prevFocusKey = useRef(focusKey);
   const transitionProgress = useRef(0);
 
   // Velocity tracking for anticipation
@@ -145,6 +147,18 @@ export default function CameraController({
       return () => clearTimeout(timer);
     }
   }, [mode]);
+
+  useEffect(() => {
+    if (prevFocusKey.current === focusKey) return;
+    prevFocusKey.current = focusKey;
+    isTransitioning.current = true;
+    transitionProgress.current = 0;
+    userControlUntil.current = 0;
+    const timer = setTimeout(() => {
+      isTransitioning.current = false;
+    }, 1600);
+    return () => clearTimeout(timer);
+  }, [focusKey]);
 
   useFrame((_, delta) => {
     if (!controlsRef.current) return;

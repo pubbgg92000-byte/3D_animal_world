@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
+import perfConfig from '../../../config/performanceConfig';
 
 export default function Rock({ asset, instances }) {
   const meshRefs = useRef([]);
@@ -29,8 +30,8 @@ export default function Rock({ asset, instances }) {
       key={`${asset.id}-${index}`}
       ref={(mesh) => { meshRefs.current[index] = mesh; }}
       args={[part.geometry, part.material, instances.length]}
-      castShadow
-      receiveShadow
+      castShadow={perfConfig.enableShadows}
+      receiveShadow={perfConfig.enableShadows}
     />
   ));
 }

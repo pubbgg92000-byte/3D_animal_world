@@ -516,13 +516,11 @@ export default function Animal({
   const prevSerial = useRef(0);
   const prevForcedBehavior = useRef(null);
 
-  // Register / unregister in collision system
+  // Unregister in collision system on unmount. The live position reference is
+  // registered once after the group is positioned; avoid per-frame map churn.
   useEffect(() => {
-    // We'll update the position ref live in useFrame; just register with a dummy for now
-    const posRef = { x: 0, y: 0, z: 0 };
-    registerAnimal(config.id, posRef, collisionRadius);
     return () => unregisterAnimal(config.id);
-  }, [collisionRadius, config.id]);
+  }, [config.id]);
 
   // Set initial position
   useEffect(() => {
@@ -530,11 +528,12 @@ export default function Animal({
       const [x, , z] = config.spawnPos;
       const y = getTerrainHeight(x, z) - footSink;
       groupRef.current.position.set(x, y, z);
+      registerAnimal(config.id, groupRef.current.position, collisionRadius);
       terrainY.current = y;
       lastPosition.current.set(x, y, z); // seed so frame-0 delta is zero
       lastSafePosition.current.set(x, y, z);
     }
-  }, [config.spawnPos, footSink]);
+  }, [collisionRadius, config.id, config.spawnPos, footSink]);
 
   // Enhance materials
   useEffect(() => {
@@ -762,8 +761,11 @@ export default function Animal({
       pos.z = lastSafePosition.current.z;
     }
 
-    // Hard collisions apply only to trunks, large rocks, and other animals.
-    resolveCollisions(pos, config.id, collisionRadius);
+    // Hard collisions apply only while moving. Idle animals don't need to scan
+    // every tree/rock each frame.
+    if (activeDest !== null) {
+      resolveCollisions(pos, config.id, collisionRadius);
+    }
     pos.x = THREE.MathUtils.clamp(pos.x, -WORLD_HALF, WORLD_HALF);
     pos.z = THREE.MathUtils.clamp(pos.z, -WORLD_HALF, WORLD_HALF);
 
@@ -782,9 +784,6 @@ export default function Animal({
     }
     terrainY.current = targetY;
     lastSafePosition.current.copy(pos);
-
-    // Update live position in collision registry
-    registerAnimal(config.id, pos, collisionRadius);
 
     onPositionUpdate?.(config.id, pos);
 
