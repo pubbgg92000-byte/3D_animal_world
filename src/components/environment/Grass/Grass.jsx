@@ -162,15 +162,60 @@ function setInstanceMatrices(mesh, matrices) {
   mesh.computeBoundingSphere();
 }
 
-export default function Grass() {
+function filterMatricesByRegion(matrices, center, nearRadius, region) {
+  if (region === 'all') return matrices;
+  return matrices.filter((matrix) => {
+    const distance = Math.hypot(matrix.elements[12] - center[0], matrix.elements[14] - center[2]);
+    return region === 'near' ? distance <= nearRadius : distance > nearRadius;
+  });
+}
+
+function TallGrassLayer({ matrices }) {
+  const refs = useRef([]);
+  const gltf = useGLTF(TALL_GRASS_MODEL_URL);
+  const parts = useMemo(() => bakeGrassModel(gltf.scene, 2), [gltf.scene]);
+
+  useEffect(() => {
+    refs.current.forEach((mesh) => setInstanceMatrices(mesh, matrices));
+  }, [matrices, parts]);
+
+  useEffect(() => () => {
+    parts.forEach((part) => {
+      part.geometry?.dispose?.();
+      part.material?.dispose?.();
+    });
+  }, [parts]);
+
+  useFrame(({ clock }) => {
+    for (const part of parts) {
+      const shader = part.material.userData?.shader;
+      if (shader) shader.uniforms.uWindTime.value = clock.elapsedTime;
+    }
+  });
+
+  return parts.map((part, index) => (
+    <instancedMesh
+      key={`tall-grass-glb-${part.name || index}`}
+      ref={(mesh) => { refs.current[index] = mesh; }}
+      args={[part.geometry, part.material, matrices.length]}
+      receiveShadow
+    />
+  ));
+}
+
+export default function Grass({
+  densityMultiplier = 1.0,
+  center = [0, 0, 0],
+  region = 'all',
+  nearRadius = 22,
+  includeTall = false,
+  onReady,
+}) {
   const grassRefs = useRef([]);
-  const tallGrassRefs = useRef([]);
   const flowerHeadRefs = useRef([]);
   const flowerStemRef = useRef();
   const grassGltf = useGLTF(GRASS_MODEL_URL);
-  const tallGrassGltf = useGLTF(TALL_GRASS_MODEL_URL);
   const grassParts = useMemo(() => bakeGrassModel(grassGltf.scene, 0), [grassGltf.scene]);
-  const tallGrassParts = useMemo(() => bakeGrassModel(tallGrassGltf.scene, 2), [tallGrassGltf.scene]);
 
   const { grassMatrices, tallGrassMatrices, flowerHeadMatrices, flowerStemMatrices, flowerColors } = useMemo(() => {
     const random = createRandom(`${WORLD_SEED}:meadow`);
@@ -179,14 +224,18 @@ export default function Grass() {
     const flowerStems = [];
     const colors = [];
 
+    const scaledGrassCount = Math.round(MAIN_GRASS_PATCH_COUNT * densityMultiplier);
+    const scaledTallGrassCount = Math.round(TALL_GRASS_PATCH_COUNT * densityMultiplier);
+    const scaledFlowerCount = Math.round(FLOWER_COUNT * densityMultiplier);
+
     const grassMatrices = makeGrassMatrices({
-      count: MAIN_GRASS_PATCH_COUNT,
+      count: scaledGrassCount,
       random,
       centers,
       baseScale: 0.082,
     });
     const tallGrassMatrices = makeGrassMatrices({
-      count: TALL_GRASS_PATCH_COUNT,
+      count: scaledTallGrassCount,
       random,
       centers,
       baseScale: 0.019,
@@ -195,7 +244,7 @@ export default function Grass() {
 
     const dummy = new THREE.Object3D();
 
-    for (let index = 0; index < FLOWER_COUNT; index++) {
+    for (let index = 0; index < scaledFlowerCount; index++) {
       let x;
       let z;
       if (index < 110) {
@@ -230,24 +279,50 @@ export default function Grass() {
       flowerStemMatrices: flowerStems,
       flowerColors: colors,
     };
-  }, []);
+  }, [densityMultiplier]);
+
+  const regionalMatrices = useMemo(() => ({
+    grass: filterMatricesByRegion(grassMatrices, center, nearRadius, region),
+    tall: filterMatricesByRegion(tallGrassMatrices, center, nearRadius, region),
+    flowerHeads: filterMatricesByRegion(flowerHeadMatrices, center, nearRadius, region),
+    flowerStems: filterMatricesByRegion(flowerStemMatrices, center, nearRadius, region),
+  }), [
+    center,
+    flowerHeadMatrices,
+    flowerStemMatrices,
+    grassMatrices,
+    nearRadius,
+    region,
+    tallGrassMatrices,
+  ]);
 
   useEffect(() => {
-    grassRefs.current.forEach((mesh) => setInstanceMatrices(mesh, grassMatrices));
-    tallGrassRefs.current.forEach((mesh) => setInstanceMatrices(mesh, tallGrassMatrices));
-    setInstanceMatrices(flowerStemRef.current, flowerStemMatrices);
-    setInstanceMatrices(flowerHeadRefs.current[0], flowerHeadMatrices);
-    flowerColors.forEach((color, index) => flowerHeadRefs.current[0]?.setColorAt(index, color));
+    grassRefs.current.forEach((mesh) => setInstanceMatrices(mesh, regionalMatrices.grass));
+    setInstanceMatrices(flowerStemRef.current, regionalMatrices.flowerStems);
+    setInstanceMatrices(flowerHeadRefs.current[0], regionalMatrices.flowerHeads);
+    regionalMatrices.flowerHeads.forEach((_, index) => {
+      const color = flowerColors[index % flowerColors.length];
+      if (color) flowerHeadRefs.current[0]?.setColorAt(index, color);
+    });
     if (flowerHeadRefs.current[0]?.instanceColor) {
       flowerHeadRefs.current[0].instanceColor.needsUpdate = true;
     }
-  }, [flowerColors, flowerHeadMatrices, flowerStemMatrices, grassMatrices, grassParts, tallGrassMatrices, tallGrassParts]);
+    const frame = requestAnimationFrame(() => onReady?.());
+    return () => cancelAnimationFrame(frame);
+  }, [flowerColors, grassParts, onReady, regionalMatrices]);
+
+  useEffect(() => () => {
+    grassParts.forEach((part) => {
+      part.geometry?.dispose?.();
+      part.material?.dispose?.();
+    });
+  }, [grassParts]);
 
   useFrame(({ clock }) => {
-    [...grassParts, ...tallGrassParts].forEach((part) => {
+    for (const part of grassParts) {
       const shader = part.material.userData?.shader;
       if (shader) shader.uniforms.uWindTime.value = clock.elapsedTime;
-    });
+    }
   });
 
   return (
@@ -256,27 +331,20 @@ export default function Grass() {
         <instancedMesh
           key={`main-grass-glb-${part.name || index}`}
           ref={(mesh) => { grassRefs.current[index] = mesh; }}
-          args={[part.geometry, part.material, grassMatrices.length]}
+          args={[part.geometry, part.material, regionalMatrices.grass.length]}
           receiveShadow
         />
       ))}
 
-      {tallGrassParts.map((part, index) => (
-        <instancedMesh
-          key={`tall-grass-glb-${part.name || index}`}
-          ref={(mesh) => { tallGrassRefs.current[index] = mesh; }}
-          args={[part.geometry, part.material, tallGrassMatrices.length]}
-          receiveShadow
-        />
-      ))}
+      {includeTall && <TallGrassLayer matrices={regionalMatrices.tall} />}
 
-      <instancedMesh ref={flowerStemRef} args={[null, null, flowerStemMatrices.length]}>
+      <instancedMesh ref={flowerStemRef} args={[null, null, regionalMatrices.flowerStems.length]}>
         <cylinderGeometry args={[0.08, 0.12, 3.5, 4]} />
         <meshStandardMaterial color="#397b35" roughness={0.9} />
       </instancedMesh>
       <instancedMesh
         ref={(mesh) => { flowerHeadRefs.current[0] = mesh; }}
-        args={[null, null, flowerHeadMatrices.length]}
+        args={[null, null, regionalMatrices.flowerHeads.length]}
       >
         <sphereGeometry args={[1, 6, 5]} />
         <meshStandardMaterial roughness={0.7} />
@@ -285,5 +353,4 @@ export default function Grass() {
   );
 }
 
-useGLTF.preload(GRASS_MODEL_URL);
-useGLTF.preload(TALL_GRASS_MODEL_URL);
+// Preloads removed — grass models lazy-load when stage 2 mounts this component

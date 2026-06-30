@@ -8,6 +8,16 @@
 
 /** Duration (seconds) for default crossfades */
 const DEFAULT_FADE_DURATION = 0.35;
+const actionKeyCache = new WeakMap();
+
+function getCache(actions) {
+  let cache = actionKeyCache.get(actions);
+  if (!cache) {
+    cache = new Map();
+    actionKeyCache.set(actions, cache);
+  }
+  return cache;
+}
 
 /**
  * Resolve a clean animation name to its raw key in the actions map.
@@ -22,17 +32,24 @@ const DEFAULT_FADE_DURATION = 0.35;
  */
 function resolveActionKey(actions, cleanName) {
   if (!actions) return null;
+  const cache = getCache(actions);
+  if (cache.has(cleanName)) return cache.get(cleanName);
 
   // Direct match first
-  if (actions[cleanName]) return cleanName;
+  if (actions[cleanName]) {
+    cache.set(cleanName, cleanName);
+    return cleanName;
+  }
 
   // Search for a key ending with the clean name
   const keys = Object.keys(actions);
   for (const key of keys) {
     if (key.endsWith(cleanName) && actions[key]) {
+      cache.set(cleanName, key);
       return key;
     }
   }
+  cache.set(cleanName, null);
   return null;
 }
 
@@ -63,20 +80,26 @@ export function crossFadeTo(
   }
 
   const toAction = actions[toKey];
+  const alreadyActive =
+    fromName === toName &&
+    toAction.isRunning?.() &&
+    Math.abs((toAction.timeScale || 1) - timeScale) < 0.001;
+
+  if (alreadyActive) return toName;
 
   // Configure target
   toAction.setEffectiveTimeScale(timeScale);
   toAction.setEffectiveWeight(1);
-  toAction.time = 0;
 
   const fromKey = fromName ? resolveActionKey(actions, fromName) : null;
   if (fromKey && fromKey !== toKey && actions[fromKey]) {
     const fromAction = actions[fromKey];
     toAction.enabled = true;
+    if (!toAction.isRunning?.()) toAction.reset();
     toAction.play();
     fromAction.crossFadeTo(toAction, duration, true);
   } else {
-    toAction.reset().fadeIn(duration).play();
+    if (!toAction.isRunning?.()) toAction.reset().fadeIn(duration).play();
   }
 
   return toName;

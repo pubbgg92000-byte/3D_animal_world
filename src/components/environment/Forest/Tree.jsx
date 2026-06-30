@@ -59,6 +59,10 @@ export default function Tree({ asset, instances }) {
     });
   }, [matrices]);
 
+  useEffect(() => () => {
+    materials.forEach((material) => material.dispose?.());
+  }, [materials]);
+
   useFrame(({ clock }) => {
     for (const material of materials) {
       const shader = material.userData.windShader;

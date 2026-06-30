@@ -9,7 +9,10 @@ export const POND_RADIUS = 5.5;
 export const POND_WATER_Y = 0.22;
 
 export const STREAM_START_Z = POND_Z + POND_RADIUS;
-export const STREAM_END_Z = 55;
+// Let the stream reach the visible edge of the playable plain instead of
+// stopping short in the meadow. WORLD_HALF is the same clamped boundary used
+// for animals/camera-friendly world movement.
+export const STREAM_END_Z = WORLD_HALF;
 
 const POND_HUNT_ROCKS = [
   [0.00, 1.01, 1.8, 1.2, 1.5],
@@ -131,7 +134,7 @@ export function createWaterApproachPoints() {
     points.push(new THREE.Vector3(x, getTerrainHeight(x, z), z));
   }
 
-  for (const z of [14, 22, 32, 44, 52]) {
+  for (const z of [14, 22, 32, 44, 52, STREAM_END_Z - 0.9]) {
     const center = streamCenterX(z);
     const bank = streamHalfWidth(z) + 0.28;
     for (const side of [-1, 1]) {

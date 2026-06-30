@@ -104,4 +104,4 @@ export function useAssetManager() {
   return value;
 }
 
-useGLTF.preload(FOREST_PACK_URL);
+// Preload removed — forest pack lazy-loads when stage 3 mounts this component

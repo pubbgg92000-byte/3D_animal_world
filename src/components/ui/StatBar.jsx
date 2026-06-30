@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, memo } from 'react';
 import { STAT_COLORS } from '../../config/designTokens';
 
 /**
@@ -18,7 +18,7 @@ const STAT_META = {
   hunger:    { icon: '🍖', label: 'Hunger',    colorKey: 'hunger' },
 };
 
-export default function StatBar({ stat = 'energy', value = 100, compact = false }) {
+function StatBar({ stat = 'energy', value = 100, compact = false }) {
   const meta = STAT_META[stat] || STAT_META.energy;
   const pct = Math.max(0, Math.min(100, value));
   const colors = STAT_COLORS[meta.colorKey];
@@ -93,3 +93,5 @@ export default function StatBar({ stat = 'energy', value = 100, compact = false 
     </div>
   );
 }
+
+export default memo(StatBar);

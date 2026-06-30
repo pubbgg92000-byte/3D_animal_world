@@ -1,4 +1,4 @@
-import { useRef, useMemo } from 'react';
+import { useRef, useMemo, useEffect, useState } from 'react';
 import { Cloud } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -100,11 +100,33 @@ const SKY_FRAGMENT = `
 const _sunDir = new THREE.Vector3();
 const _fogColor = new THREE.Color();
 
+function getCloudMood(label = '') {
+  const value = label.toLowerCase();
+  if (value.includes('storm') || value.includes('thunder')) {
+    return { color: '#667085', opacity: 0.92, speed: 1.9, scale: [1.18, 0.78, 1.26] };
+  }
+  if (value.includes('rain') || value.includes('showers') || value.includes('drizzle')) {
+    return { color: '#9aa6b8', opacity: 0.86, speed: 1.55, scale: [1.1, 0.76, 1.18] };
+  }
+  if (value.includes('cloud') || value.includes('fog')) {
+    return { color: '#d8dee8', opacity: 0.78, speed: 0.95, scale: [1.04, 0.86, 1.08] };
+  }
+  return { color: '#ffffff', opacity: 0.56, speed: 0.62, scale: [0.9, 0.76, 0.95] };
+}
+
 export default function Sky({ simMinutesRef }) {
   const shaderRef = useRef();
   const fogRef = useRef();
   const cloudGroupRef = useRef();
   const cloudGroup2Ref = useRef();
+  const [climate, setClimate] = useState({ label: 'Clear' });
+  const cloudMood = getCloudMood(climate.label);
+
+  useEffect(() => {
+    const handler = (event) => setClimate(event.detail || { label: 'Clear' });
+    window.addEventListener('wild-trails:climate', handler);
+    return () => window.removeEventListener('wild-trails:climate', handler);
+  }, []);
 
   // Shader uniforms
   const uniforms = useMemo(
@@ -163,12 +185,14 @@ export default function Sky({ simMinutesRef }) {
 
     // Cloud drift
     if (cloudGroupRef.current) {
-      cloudGroupRef.current.position.x = Math.sin(t * 0.012) * 6;
-      cloudGroupRef.current.position.z = Math.cos(t * 0.009) * 4;
+      cloudGroupRef.current.position.x = Math.sin(t * 0.012 * cloudMood.speed) * 8;
+      cloudGroupRef.current.position.z = Math.cos(t * 0.009 * cloudMood.speed) * 5;
+      cloudGroupRef.current.rotation.y = Math.sin(t * 0.018 * cloudMood.speed) * 0.04;
     }
     if (cloudGroup2Ref.current) {
-      cloudGroup2Ref.current.position.x = Math.sin(t * 0.008 + 1.2) * 8;
-      cloudGroup2Ref.current.position.z = Math.cos(t * 0.010 + 0.7) * 5;
+      cloudGroup2Ref.current.position.x = Math.sin(t * 0.008 * cloudMood.speed + 1.2) * 10;
+      cloudGroup2Ref.current.position.z = Math.cos(t * 0.010 * cloudMood.speed + 0.7) * 6;
+      cloudGroup2Ref.current.rotation.y = Math.cos(t * 0.014 * cloudMood.speed) * 0.035;
     }
   });
 
@@ -192,24 +216,24 @@ export default function Sky({ simMinutesRef }) {
       </mesh>
 
       {/* First cloud layer — main fluffy whites */}
-      <group ref={cloudGroupRef}>
-        <Cloud position={[-18, 22, -15]} speed={0.08} opacity={0.90} width={28} depth={4}  segments={28} color="#ffffff" />
-        <Cloud position={[ 22, 26, -8 ]} speed={0.06} opacity={0.85} width={22} depth={3}  segments={22} color="#f8f8ff" />
-        <Cloud position={[  8, 20, -25]} speed={0.07} opacity={0.88} width={25} depth={3.5} segments={24} color="#ffffff" />
-        <Cloud position={[-30, 28, 10 ]} speed={0.05} opacity={0.80} width={32} depth={4}  segments={30} color="#f5f5ff" />
-        <Cloud position={[ 35, 24, 20 ]} speed={0.09} opacity={0.82} width={20} depth={3}  segments={20} color="#ffffff" />
-        <Cloud position={[-10, 30, 30 ]} speed={0.06} opacity={0.78} width={26} depth={3.5} segments={26} color="#eef5ff" />
-        <Cloud position={[ 15, 18, 40 ]} speed={0.08} opacity={0.85} width={18} depth={2.5} segments={18} color="#ffffff" />
-        <Cloud position={[-40, 25, -5 ]} speed={0.05} opacity={0.75} width={30} depth={4}  segments={28} color="#f0f0ff" />
+      <group ref={cloudGroupRef} scale={cloudMood.scale}>
+        <Cloud position={[-18, 22, -15]} speed={0.05 * cloudMood.speed} opacity={cloudMood.opacity} width={30} depth={5.4} segments={34} color={cloudMood.color} />
+        <Cloud position={[ 22, 26, -8 ]} speed={0.04 * cloudMood.speed} opacity={cloudMood.opacity * 0.94} width={24} depth={4.4} segments={28} color={cloudMood.color} />
+        <Cloud position={[  8, 20, -25]} speed={0.045 * cloudMood.speed} opacity={cloudMood.opacity * 0.96} width={27} depth={4.8} segments={30} color={cloudMood.color} />
+        <Cloud position={[-30, 28, 10 ]} speed={0.035 * cloudMood.speed} opacity={cloudMood.opacity * 0.9} width={34} depth={5.6} segments={34} color={cloudMood.color} />
+        <Cloud position={[ 35, 24, 20 ]} speed={0.055 * cloudMood.speed} opacity={cloudMood.opacity * 0.88} width={22} depth={4.2} segments={24} color={cloudMood.color} />
+        <Cloud position={[-10, 30, 30 ]} speed={0.04 * cloudMood.speed} opacity={cloudMood.opacity * 0.86} width={28} depth={4.8} segments={30} color={cloudMood.color} />
+        <Cloud position={[ 15, 18, 40 ]} speed={0.05 * cloudMood.speed} opacity={cloudMood.opacity * 0.9} width={20} depth={3.8} segments={22} color={cloudMood.color} />
+        <Cloud position={[-40, 25, -5 ]} speed={0.035 * cloudMood.speed} opacity={cloudMood.opacity * 0.84} width={32} depth={5.2} segments={32} color={cloudMood.color} />
       </group>
 
       {/* Second cloud layer — higher, lighter */}
-      <group ref={cloudGroup2Ref}>
-        <Cloud position={[  5, 36, -12]} speed={0.04} opacity={0.55} width={35} depth={5}  segments={20} color="#ffffff" />
-        <Cloud position={[-25, 38,  18]} speed={0.03} opacity={0.50} width={40} depth={5}  segments={22} color="#f8faff" />
-        <Cloud position={[ 40, 34,  -2]} speed={0.05} opacity={0.60} width={30} depth={4}  segments={20} color="#ffffff" />
-        <Cloud position={[-12, 40, -35]} speed={0.04} opacity={0.48} width={38} depth={5}  segments={24} color="#eef2ff" />
-        <Cloud position={[ 28, 35,  35]} speed={0.03} opacity={0.52} width={36} depth={4.5} segments={22} color="#ffffff" />
+      <group ref={cloudGroup2Ref} scale={cloudMood.scale}>
+        <Cloud position={[  5, 36, -12]} speed={0.028 * cloudMood.speed} opacity={cloudMood.opacity * 0.62} width={38} depth={6.0} segments={24} color={cloudMood.color} />
+        <Cloud position={[-25, 38,  18]} speed={0.023 * cloudMood.speed} opacity={cloudMood.opacity * 0.56} width={44} depth={6.2} segments={26} color={cloudMood.color} />
+        <Cloud position={[ 40, 34,  -2]} speed={0.032 * cloudMood.speed} opacity={cloudMood.opacity * 0.66} width={34} depth={5.2} segments={24} color={cloudMood.color} />
+        <Cloud position={[-12, 40, -35]} speed={0.026 * cloudMood.speed} opacity={cloudMood.opacity * 0.54} width={42} depth={6.0} segments={28} color={cloudMood.color} />
+        <Cloud position={[ 28, 35,  35]} speed={0.022 * cloudMood.speed} opacity={cloudMood.opacity * 0.58} width={40} depth={5.6} segments={26} color={cloudMood.color} />
       </group>
     </>
   );

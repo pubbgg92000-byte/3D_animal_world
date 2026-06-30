@@ -18,9 +18,11 @@ const DRINK_NECK_ANGLE = 1.6;
 const RABBIT_STREAM_LEAP_HEIGHT = 0.72;
 const FUR_TEXTURES = new Map();
 const FACIAL_MATERIALS = new Map();
+const ANIMATION_KEY_CACHE = new WeakMap();
 const _boneEuler = new THREE.Euler();
 const _boneQuat = new THREE.Quaternion();
 const _commandLook = new THREE.Vector3();
+const _kidFriendlyLight = new THREE.Color('#fff0c8');
 
 const FUR_PROFILES = {
   moose: {
@@ -326,10 +328,12 @@ function enhanceMaterials(root, config) {
       if (!mat) continue;
 
       if (config.bodyMaterials.includes(mat.name)) {
-        mat.color.set(config.furTint || profile.base);
+        mat.color
+          .set(config.furTint || profile.base)
+          .lerp(_kidFriendlyLight, profile.brightnessBoost ?? 0.16);
         mat.roughness = profile.roughness;
         mat.metalness = 0.0;
-        mat.envMapIntensity = 0.2;
+        mat.envMapIntensity = 0.32;
         if (mat.normalScale) mat.normalScale.set(1.45, 1.45);
         if (furDetail) {
           mat.map = furDetail;
@@ -368,10 +372,10 @@ function enhanceMaterials(root, config) {
             gl_FragColor.rgb *= 0.82 + strandNoise * 0.18 + fiberMask * ${profile.fiberStrength.toFixed(3)};
             float topLight = pow(max(dot(vWorldNormal, vec3(0.0, 1.0, 0.0)), 0.0), 0.55);
             float underside = 1.0 - topLight;
-            gl_FragColor.rgb *= 0.68 + topLight * 0.34;
-            gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * vec3(0.62, 0.55, 0.48), underside * 0.16);
+            gl_FragColor.rgb *= 0.76 + topLight * 0.38;
+            gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * vec3(0.72, 0.66, 0.58), underside * 0.12);
             float backLight = pow(1.0 - abs(dot(viewDir, vWorldNormal)), 3.0);
-            gl_FragColor.rgb += vec3(0.16, 0.11, 0.06) * backLight;
+            gl_FragColor.rgb += vec3(0.22, 0.16, 0.08) * backLight;
             #include <dithering_fragment>`
           );
         };
@@ -394,11 +398,25 @@ function enhanceMaterials(root, config) {
    Animation resolver — fuzzy match clip names
    ======================================== */
 function resolveAnimKey(actions, key) {
-  if (actions[key]) return key;
+  if (!actions || !key) return null;
+  let cache = ANIMATION_KEY_CACHE.get(actions);
+  if (!cache) {
+    cache = new Map();
+    ANIMATION_KEY_CACHE.set(actions, cache);
+  }
+  if (cache.has(key)) return cache.get(key);
+  if (actions[key]) {
+    cache.set(key, key);
+    return key;
+  }
   const keys = Object.keys(actions);
   for (const k of keys) {
-    if (k.toLowerCase().includes(key.toLowerCase())) return k;
+    if (k.toLowerCase().includes(key.toLowerCase())) {
+      cache.set(key, k);
+      return k;
+    }
   }
+  cache.set(key, null);
   return null;
 }
 
@@ -408,13 +426,21 @@ function crossFadeToAnim(actions, currentAction, targetKey, fadeDuration = 0.3, 
 
   const action = actions[resolved];
   if (!action) return currentAction;
+  const alreadyActive =
+    currentAction === action &&
+    action.isRunning?.() &&
+    Math.abs((action.timeScale || 1) - timeScale) < 0.001;
 
-  action.reset();
+  if (alreadyActive) return action;
+
   action.setLoop(THREE.LoopRepeat);
   action.timeScale = timeScale;
 
   if (currentAction && currentAction !== action) {
+    if (!action.isRunning?.()) action.reset();
     action.crossFadeFrom(currentAction, fadeDuration, true);
+  } else if (!action.isRunning?.()) {
+    action.reset();
   }
 
   action.play();
@@ -435,6 +461,7 @@ export default function Animal({
   onPositionUpdate,
   onStatsUpdate,
   onBehaviorUpdate,
+  onReady,
 }) {
   const groupRef = useRef();
   const presentationRef = useRef();
@@ -457,6 +484,8 @@ export default function Animal({
   const verticalVelocity = useRef(0);
   const stillTimer = useRef(0);
   const wasMoving = useRef(false);
+  const entranceProgress = useRef(0);
+  const readySent = useRef(false);
 
   // Bones
   const neckBones = useRef([]);
@@ -575,10 +604,14 @@ export default function Animal({
         actionsReady.current = true;
         currentAnim.current = crossFadeToAnim(actions, null, config.anims.idle);
         setIdle(true);
+        if (!readySent.current) {
+          readySent.current = true;
+          onReady?.(config.id);
+        }
       }
     }, 100);
     return () => clearInterval(check);
-  }, [actions, config.anims.idle]);
+  }, [actions, config.anims.idle, config.id, onReady]);
 
   // Animation helpers
   const playIdle = useCallback(() => {
@@ -706,6 +739,13 @@ export default function Animal({
   useFrame((_, delta) => {
     if (!groupRef.current) return;
     const pos = groupRef.current.position;
+
+    if (entranceProgress.current < 1 && presentationRef.current) {
+      entranceProgress.current = Math.min(1, entranceProgress.current + delta * 1.8);
+      const eased = 1 - Math.pow(1 - entranceProgress.current, 3);
+      const scale = THREE.MathUtils.lerp(0.86, 1, eased);
+      presentationRef.current.scale.setScalar(scale);
+    }
 
     if (commandLookTarget.current && headBone.current) {
       _commandLook.copy(commandLookTarget.current).sub(pos).setY(0);

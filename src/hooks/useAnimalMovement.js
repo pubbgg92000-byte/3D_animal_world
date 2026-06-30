@@ -206,6 +206,19 @@ export default function useAnimalMovement(
     }
 
     if (noProgressTimer.current > 2.8) {
+      const streamStuck = isStreamAt(object.position.x, object.position.z, 0.65)
+        || isStreamAt(_ahead.x, _ahead.z, 0.65);
+      if (streamStuck) {
+        // Shallow streams are passable; if an animal slows down on the bank,
+        // give it a decisive crossing stride instead of ending the command.
+        const side = Math.sign(object.position.x - (object.position.x - _desired.x)) || avoidanceSide.current;
+        _tangent.set(-_desired.z * side, 0, _desired.x * side);
+        smoothDirection.current.copy(_desired).addScaledVector(_tangent, 0.18).normalize();
+        noProgressTimer.current = 0;
+        progressTimer.current = 0;
+        avoidanceKey.current = null;
+        avoidanceHold.current = 0;
+      } else {
       // Close enough but orbiting around the target/obstacle: finish the move
       // instead of endlessly circling. Farther away: reset to direct steering.
       if (distance < Math.max(arrivalThreshold * 3.2, 1.7)) {
@@ -222,6 +235,7 @@ export default function useAnimalMovement(
       noProgressTimer.current = 0;
       lastDistance.current = Infinity;
       return;
+      }
     }
 
     if (escapeTimer.current > 0) {

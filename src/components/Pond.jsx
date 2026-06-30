@@ -18,7 +18,7 @@ import { registerStaticObstacles, unregisterStaticObstacles } from '../utils/col
 
 /* ================================================================
    POND — full water level that overflows into a stream
-   Stream flows from pond south edge to world boundary (z = +40)
+  Stream flows from pond south edge to the plain edge.
    ================================================================ */
 
 export const POND_POSITION = new THREE.Vector3(POND_X, 0, POND_Z);
@@ -29,7 +29,7 @@ const WATER_Y  = POND_WATER_Y;
 const BED_Y    = -1.45;   // pond floor depth
 const STREAM_GRASS_MODEL_URL = '/grass.glb';
 
-// Stream end — where animals drink (edge of 80×80 world, z-positive side)
+// Stream end — where animals drink (edge of the playable world, z-positive side)
 export const STREAM_END = new THREE.Vector3(
   streamCenterX(STREAM_END_Z),
   0,
@@ -128,7 +128,7 @@ function WaterSurface({ radius }) {
 }
 
 /* ================================================================
-   Stream — flows from south pond edge toward z=+40 world boundary
+   Stream — flows from south pond edge toward the world boundary
    Width tapers from ~2.5 at pond to ~1.0 at edge
    ================================================================ */
 const STREAM_WATER_FRAG = /* glsl */`
@@ -167,8 +167,8 @@ const STREAM_VERT = /* glsl */`
   }
 `;
 
-function StreamWater() {
-  // The stream starts at pond south edge (z=5+5.5=10.5) and flows to z=55
+function StreamWater({ detail = 'full' }) {
+  // The stream starts at pond south edge and stops cleanly at the plain edge.
   // We build a tapered ribbon in local coords, translated to world
   // Each vertex Y follows terrain height so the stream hugs the ground
   const streamMat = useMemo(() => new THREE.ShaderMaterial({
@@ -190,7 +190,7 @@ function StreamWater() {
     const startZ = STREAM_START_Z - 0.62;
     const endZ = STREAM_END_Z;
     const length = endZ - startZ;
-    const segs   = 48;
+    const segs   = 56;
     const geo = new THREE.BufferGeometry();
     const verts = [];
     const uvs   = [];
@@ -274,7 +274,7 @@ function StreamWater() {
         <primitive object={streamMat} attach="material" />
       </mesh>
       <StreamGravelBanks />
-      <StreamBankGrass />
+      {detail !== 'essential' && <StreamBankGrass />}
       <Waterfall />
     </group>
   );
@@ -479,37 +479,6 @@ function StreamBankGrass() {
   );
 }
 
-const WATERFALL_VERT = /* glsl */`
-  varying vec2 vUv;
-  varying float vMist;
-  uniform float uTime;
-  void main(){
-    vUv = uv;
-    vec3 pos = position;
-    float fall = sin(uv.y * 34.0 - uTime * 6.5 + uv.x * 5.0) * 0.035;
-    fall += sin(uv.y * 17.0 - uTime * 4.0) * 0.025;
-    pos.x += fall;
-    vMist = smoothstep(0.72, 1.0, uv.y);
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-  }
-`;
-
-const WATERFALL_FRAG = /* glsl */`
-  varying vec2 vUv;
-  varying float vMist;
-  uniform float uTime;
-  float stripe(float y, float speed, float scale){
-    return pow(0.5 + 0.5 * sin(y * scale - uTime * speed), 5.0);
-  }
-  void main(){
-    float flow = stripe(vUv.y, 12.0, 34.0) * 0.35 + stripe(vUv.y + vUv.x, 8.0, 18.0) * 0.22;
-    vec3 col = mix(vec3(0.20, 0.62, 0.86), vec3(0.86, 0.96, 1.0), flow + vMist * 0.75);
-    float edgeFade = smoothstep(0.0, 0.08, vUv.x) * (1.0 - smoothstep(0.92, 1.0, vUv.x));
-    float alpha = edgeFade * (0.62 + flow * 0.26 + vMist * 0.18);
-    gl_FragColor = vec4(col, alpha);
-  }
-`;
-
 function WaterfallMist({ position, scale = 1 }) {
   const ref = useRef();
   useFrame(({ clock }) => {
@@ -534,60 +503,102 @@ function WaterfallMist({ position, scale = 1 }) {
 }
 
 function Waterfall() {
-  const mat = useMemo(() => new THREE.ShaderMaterial({
-    vertexShader: WATERFALL_VERT,
-    fragmentShader: WATERFALL_FRAG,
-    uniforms: { uTime: { value: 0 } },
-    transparent: true,
-    depthTest: true,
-    depthWrite: true,
-    side: THREE.DoubleSide,
-  }), []);
-
-  useFrame(({ clock }) => {
-    mat.uniforms.uTime.value = clock.elapsedTime;
-  });
-
-  const geometry = useMemo(() => {
-    const endZ = STREAM_END_Z;
-    const width = streamHalfWidth(endZ) * 2.4;
-    const streamEndY = getStreamWaterHeight(endZ);
-    const topY = streamEndY - 0.02;
-    const bottomY = streamEndY - 1.35;
-    const x = streamCenterX(endZ);
-    const z = endZ + 0.16;
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute(
-      'position',
-      new THREE.Float32BufferAttribute([
-        x - width / 2, topY, z,
-        x + width / 2, topY, z,
-        x - width / 2, bottomY, z + 0.42,
-        x + width / 2, bottomY, z + 0.42,
-      ], 3)
-    );
-    geo.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 1, 1], 2));
-    geo.setIndex([0, 2, 1, 1, 2, 3]);
-    geo.computeVertexNormals();
-    return geo;
-  }, []);
-
   const endX = streamCenterX(STREAM_END_Z);
-  const bottomZ = STREAM_END_Z + 0.58;
+  const endZ = STREAM_END_Z;
+  const width = streamHalfWidth(endZ) * 2.6;
   const streamEndY = getStreamWaterHeight(STREAM_END_Z);
-  const splashY = streamEndY - 1.4;
+  const splashY = streamEndY - 0.18;
+
+  const ringCenterZ = endZ + 0.46;
+  const rockLayers = useMemo(() => ([
+    {
+      key: 'core',
+      label: 'Core rock ring',
+      color: '#46413a',
+      position: [endX, streamEndY - 0.54, ringCenterZ],
+      args: [1.35, 0.26, 10, 42],
+      scale: [1.7, 0.62, 1.0],
+    },
+    {
+      key: 'mantle',
+      label: 'Mantle bed ring',
+      color: '#7b6848',
+      position: [endX, streamEndY - 0.3, ringCenterZ],
+      args: [1.18, 0.21, 10, 42],
+      scale: [1.62, 0.54, 0.92],
+    },
+    {
+      key: 'crust',
+      label: 'Crust ledge ring',
+      color: '#9b9176',
+      position: [endX, streamEndY - 0.11, ringCenterZ],
+      args: [1.02, 0.16, 10, 42],
+      scale: [1.52, 0.45, 0.82],
+    },
+  ]), [endX, ringCenterZ, streamEndY]);
+
+  const boulders = useMemo(() => {
+    const colors = ['#615a4e', '#817560', '#5a554b', '#8a7d66', '#6e604d'];
+    return Array.from({ length: 22 }, (_, index) => {
+      const angle = (index / 22) * Math.PI * 2;
+      const wobble = Math.sin(index * 2.11) * 0.12;
+      const rx = 2.15 + wobble;
+      const rz = 1.16 + Math.cos(index * 1.37) * 0.08;
+      const size = 0.26 + (index % 5) * 0.045;
+      return {
+        key: `mouth-ring-${index}`,
+        x: endX + Math.cos(angle) * rx,
+        y: streamEndY - 0.02 + Math.sin(index * 1.7) * 0.04,
+        z: ringCenterZ + Math.sin(angle) * rz,
+        s: [size * (1.25 + (index % 3) * 0.16), size * 0.72, size * (1.05 + (index % 4) * 0.12)],
+        r: angle + Math.sin(index) * 0.35,
+        c: colors[index % colors.length],
+      };
+    });
+  }, [endX, ringCenterZ, streamEndY]);
 
   return (
     <group>
-      <mesh geometry={geometry} renderOrder={0}>
-        <primitive object={mat} attach="material" />
+      {rockLayers.map((layer) => (
+        <mesh
+          key={layer.key}
+          position={layer.position}
+          scale={layer.scale}
+          rotation={[-Math.PI / 2, 0, 0]}
+          castShadow
+          receiveShadow
+          userData={{ label: layer.label }}
+        >
+          <torusGeometry args={layer.args} />
+          <meshStandardMaterial color={layer.color} roughness={0.96} metalness={0.02} />
+        </mesh>
+      ))}
+
+      {boulders.map((rock) => (
+        <mesh
+          key={rock.key}
+          position={[rock.x, rock.y, rock.z]}
+          scale={rock.s}
+          rotation={[0.28, rock.r, -0.12]}
+          castShadow
+          receiveShadow
+        >
+          <dodecahedronGeometry args={[1, 0]} />
+          <meshStandardMaterial color={rock.c} roughness={0.98} metalness={0.01} />
+        </mesh>
+      ))}
+
+      {/* Short horizontal water lip + foam, replacing the old vertical sheet. */}
+      <mesh position={[endX, streamEndY + 0.016, endZ + 0.28]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={1}>
+        <planeGeometry args={[width * 1.15, 0.72, 8, 2]} />
+        <meshBasicMaterial color="#70c8ef" transparent opacity={0.34} depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
-      <mesh position={[endX, splashY, bottomZ]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.55, 1.25, 40]} />
-        <meshBasicMaterial color="#e8fbff" transparent opacity={0.42} depthWrite={false} side={THREE.DoubleSide} />
+      <mesh position={[endX, splashY, ringCenterZ]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.5, 1.28, 48]} />
+        <meshBasicMaterial color="#e8fbff" transparent opacity={0.48} depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
-      <WaterfallMist position={[endX - 0.28, splashY + 0.03, bottomZ + 0.14]} scale={0.9} />
-      <WaterfallMist position={[endX + 0.38, splashY + 0.06, bottomZ - 0.08]} scale={0.72} />
+      <WaterfallMist position={[endX - 0.28, splashY + 0.03, ringCenterZ + 0.14]} scale={0.72} />
+      <WaterfallMist position={[endX + 0.38, splashY + 0.06, ringCenterZ - 0.08]} scale={0.58} />
     </group>
   );
 }
@@ -941,8 +952,6 @@ export default function Pond() {
 /* ================================================================
    Stream — exported separately, rendered at world root (App.jsx)
    ================================================================ */
-export function PondStream() {
-  return <StreamWater />;
+export function PondStream({ detail = 'full' }) {
+  return <StreamWater detail={detail} />;
 }
-
-useGLTF.preload(STREAM_GRASS_MODEL_URL);

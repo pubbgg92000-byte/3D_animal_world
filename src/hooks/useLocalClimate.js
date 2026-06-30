@@ -189,55 +189,46 @@ export default function useLocalClimate() {
       }
     };
 
-    if (!navigator.geolocation) {
-      applyTimezoneClimate('timezone');
-      return () => {
-        cancelled = true;
-        clearInterval(seasonTimer);
-      };
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      async ({ coords }) => {
-        try {
-          const climate = await fetchClimate(coords.latitude, coords.longitude);
-          if (cancelled) return;
-          setSnapshot((current) => ({
-            ...current,
-            ...climate,
-            season: getSeason(new Date(), coords.latitude),
-            permission: 'granted',
-          }));
-        } catch {
-          if (cancelled) return;
-          setSnapshot((current) => ({
-            ...current,
-            season: getSeason(new Date(), coords.latitude),
-            permission: 'unavailable',
-          }));
-        }
-      },
-      () => {
-        if (cancelled) return;
-        setSnapshot((current) => ({
-          ...current,
-          permission: 'denied',
-          season: getSeason(new Date()),
-        }));
+    const applyPreciseLocation = () => {
+      if (!navigator.geolocation) {
         applyTimezoneClimate('timezone');
-      },
-      {
-        enableHighAccuracy: false,
-        maximumAge: 15 * 60 * 1000,
-        timeout: 6000,
+        return;
       }
-    );
+
+      navigator.geolocation.getCurrentPosition(
+        async ({ coords }) => {
+          try {
+            const climate = await fetchClimate(coords.latitude, coords.longitude);
+            if (cancelled) return;
+            setSnapshot((current) => ({
+              ...current,
+              ...climate,
+              season: getSeason(new Date(), climate.latitude),
+              permission: 'granted',
+            }));
+          } catch {
+            applyTimezoneClimate('timezone');
+          }
+        },
+        () => {
+          if (cancelled) return;
+          applyTimezoneClimate('denied');
+        },
+        { enableHighAccuracy: false, timeout: 8000, maximumAge: 15 * 60 * 1000 }
+      );
+    };
+
+    applyPreciseLocation();
 
     return () => {
       cancelled = true;
       clearInterval(seasonTimer);
     };
   }, [timezoneDetails.fallbackLocation, timezoneDetails.timeZone]);
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('wild-trails:climate', { detail: snapshot }));
+  }, [snapshot]);
 
   return snapshot;
 }

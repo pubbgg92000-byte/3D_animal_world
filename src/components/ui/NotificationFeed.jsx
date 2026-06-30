@@ -4,7 +4,9 @@
  * Positioned on the right side, below minimap.
  * Notifications slide in, auto-dismiss, and stack vertically.
  */
-export default function NotificationFeed({ notifications = [], onDismiss }) {
+import { memo } from 'react';
+
+function NotificationFeed({ notifications = [], onDismiss }) {
   if (notifications.length === 0) return null;
 
   return (
@@ -25,3 +27,5 @@ export default function NotificationFeed({ notifications = [], onDismiss }) {
     </div>
   );
 }
+
+export default memo(NotificationFeed);

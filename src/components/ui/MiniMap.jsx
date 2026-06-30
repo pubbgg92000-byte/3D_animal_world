@@ -1,13 +1,12 @@
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, memo } from 'react';
 import {
   SPECIES_COLORS,
-  SPECIES_EMOJIS,
 } from '../../config/designTokens';
 import {
   WORLD_SIZE,
   POND_X, POND_Z, POND_RADIUS,
   STREAM_START_Z, STREAM_END_Z,
-  streamCenterX, streamHalfWidth,
+  streamCenterX,
 } from '../../utils/world';
 
 /**
@@ -20,7 +19,6 @@ import {
  */
 
 const MAP_SIZE = 152;
-const MAP_PADDING = 6;
 const HALF = WORLD_SIZE / 2;
 
 function worldToMap(x, z) {
@@ -29,17 +27,38 @@ function worldToMap(x, z) {
   return [px, py];
 }
 
-export default function MiniMap({
+function MiniMap({
   animalConfigs = [],
   animalPositions = {},
   selectedId,
   cameraPosition,
 }) {
   const canvasRef = useRef(null);
+  const dataRef = useRef({
+    animalConfigs,
+    animalPositions,
+    selectedId,
+    cameraPosition,
+  });
+
+  useEffect(() => {
+    dataRef.current = {
+      animalConfigs,
+      animalPositions,
+      selectedId,
+      cameraPosition,
+    };
+  }, [animalConfigs, animalPositions, selectedId, cameraPosition]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const {
+      animalConfigs: currentConfigs,
+      animalPositions: currentPositions,
+      selectedId: currentSelectedId,
+      cameraPosition: currentCameraPosition,
+    } = dataRef.current;
     const ctx = canvas.getContext('2d');
     const dpr = window.devicePixelRatio || 1;
     canvas.width = MAP_SIZE * dpr;
@@ -88,12 +107,12 @@ export default function MiniMap({
     ctx.stroke();
 
     // Animals
-    for (const cfg of animalConfigs) {
-      const pos = animalPositions[cfg.id];
+    for (const cfg of currentConfigs) {
+      const pos = currentPositions[cfg.id];
       if (!pos) continue;
       const species = cfg.species || cfg.id;
       const [ax, az] = worldToMap(pos.x, pos.z);
-      const isSelected = cfg.id === selectedId;
+      const isSelected = cfg.id === currentSelectedId;
 
       if (isSelected) {
         // Selection ring
@@ -118,8 +137,8 @@ export default function MiniMap({
     }
 
     // Camera position
-    if (cameraPosition) {
-      const [cx, cz] = worldToMap(cameraPosition.x, cameraPosition.z);
+    if (currentCameraPosition) {
+      const [cx, cz] = worldToMap(currentCameraPosition.x, currentCameraPosition.z);
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
       ctx.lineWidth = 1;
       ctx.setLineDash([2, 2]);
@@ -128,11 +147,11 @@ export default function MiniMap({
       ctx.stroke();
       ctx.setLineDash([]);
     }
-  }, [animalConfigs, animalPositions, selectedId, cameraPosition]);
+  }, []);
 
   useEffect(() => {
     draw();
-    const interval = setInterval(draw, 500); // Redraw twice per second
+    const interval = setInterval(draw, 100); // 10 FPS; decoupled from React/r3f frames.
     return () => clearInterval(interval);
   }, [draw]);
 
@@ -146,3 +165,5 @@ export default function MiniMap({
     </div>
   );
 }
+
+export default memo(MiniMap);

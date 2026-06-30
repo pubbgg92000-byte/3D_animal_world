@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, memo } from 'react';
 import StatBar from './StatBar';
 import AbilityChip from './AbilityChip';
 import {
@@ -22,7 +22,7 @@ import {
  * Collapsed: emoji + name + health badge + mini bars + behavior
  * Expanded:  full stats, educational info, abilities
  */
-export default function AnimalPanel({
+function AnimalPanel({
   config,
   stats = {},
   behavior = 'Idle',
@@ -31,6 +31,7 @@ export default function AnimalPanel({
   onToggleCollapse,
   onClose,
   learningMode = false,
+  isMobile = false,
 }) {
   const species = config?.species || config?.id;
   const emoji = SPECIES_EMOJIS[species] || '🐾';
@@ -69,9 +70,20 @@ export default function AnimalPanel({
 
   if (!config) return null;
 
+  const panelClasses = [
+    'wt-animal-panel',
+    collapsed ? 'wt-animal-panel--collapsed' : '',
+    isMobile ? 'wt-animal-panel--mobile-sheet' : '',
+  ].filter(Boolean).join(' ');
+
   return (
-    <div className={`wt-animal-panel ${collapsed ? 'wt-animal-panel--collapsed' : ''}`}>
-      {/* ── Header (always visible) ── */}
+    <div className={panelClasses}>
+      {/* Mobile drag handle */}
+      {isMobile && (
+        <div className="wt-animal-panel__drag-handle" onClick={onToggleCollapse}>
+          <span className="wt-animal-panel__drag-bar" />
+        </div>
+      )}      {/* ── Header (always visible) ── */}
       <div className="wt-animal-panel__header-row">
         <button
           className="wt-animal-panel__header"
@@ -108,7 +120,7 @@ export default function AnimalPanel({
       </div>
 
       {/* ── Mini Stats (visible when collapsed) ── */}
-      {collapsed && (
+      {collapsed && !isMobile && (
         <div className="wt-animal-panel__mini-stats">
           <StatBar stat="energy"    value={stats.energy ?? 100}    compact />
           <StatBar stat="hydration" value={stats.hydration ?? 100} compact />
@@ -297,3 +309,5 @@ export default function AnimalPanel({
     </div>
   );
 }
+
+export default memo(AnimalPanel);

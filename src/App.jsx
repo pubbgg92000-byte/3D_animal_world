@@ -1,23 +1,17 @@
-import { Suspense, useState, useCallback, useRef, useEffect, Component } from 'react';
+import { Suspense, lazy, useState, useCallback, useRef, useEffect, useMemo, Component, memo, Profiler } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
 // Config
 import { ANIMAL_LIST } from './config/animalConfig';
+import perfConfig, { isMobileDevice } from './config/performanceConfig';
 
 // Components
-import Animal from './components/Animal';
-import Fish from './components/Fish';
-import Pond, { PondStream } from './components/Pond';
 import Sky from './components/Sky';
-import FloatingParticles from './components/FloatingParticles';
 import CameraController from './components/CameraController';
 import LoadingScreen from './components/LoadingScreen';
 import DestinationMarker from './components/DestinationMarker';
 import HUD from './components/ui/HUD';
-import AssetManager from './components/environment/AssetManager';
-import Forest from './components/environment/Forest/Forest';
-import Grass from './components/environment/Grass/Grass';
 import Terrain from './components/environment/Terrain/Terrain';
 
 import { playClick } from './hooks/useAudioFeedback';
@@ -25,11 +19,12 @@ import {
   createWaterApproachPoints,
   isWaterAt,
 } from './utils/world';
+import { markStartupPhase, reportFpsSample, reportReactCommit, reportRuntimeStats } from './utils/startupProfiler';
 
-const CANVAS_DPR = [1, 1.35];
-const SHADOW_CONFIG = { type: THREE.PCFShadowMap };
+const CANVAS_DPR = [1, perfConfig.maxDPR];
+const SHADOW_CONFIG = perfConfig.enableShadows ? { type: THREE.PCFShadowMap } : false;
 const GL_CONFIG = {
-  antialias: true,
+  antialias: perfConfig.tier !== 'low',
   toneMapping: THREE.ACESFilmicToneMapping,
   toneMappingExposure: 1.2,
   outputColorSpace: THREE.SRGBColorSpace,
@@ -40,6 +35,24 @@ const CAMERA_CONFIG = {
   far: 500,
   position: [8, 5, 10],
 };
+const IS_CONSTRAINED_DEVICE = perfConfig.tier !== 'high' || isMobileDevice();
+const HIGH_QUALITY_STREAMING =
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).get('quality') === 'high';
+const STREAM_DECOR = HIGH_QUALITY_STREAMING && !IS_CONSTRAINED_DEVICE;
+const INITIAL_ANIMAL_RATIO = 0.2;
+const INITIAL_ANIMAL_COUNT = Math.max(1, Math.ceil(ANIMAL_LIST.length * INITIAL_ANIMAL_RATIO));
+const MIN_LOADING_SCREEN_MS = 3000;
+const ANIMAL_MODEL_STREAM_INTERVAL = IS_CONSTRAINED_DEVICE ? 2200 : 1400;
+const Animal = lazy(() => import('./components/Animal'));
+const Fish = lazy(() => import('./components/Fish'));
+const Pond = lazy(() => import('./components/Pond'));
+const PondStream = lazy(() => import('./components/Pond').then((module) => ({ default: module.PondStream })));
+const FloatingParticles = lazy(() => import('./components/FloatingParticles'));
+const AssetManager = lazy(() => import('./components/environment/AssetManager'));
+const Forest = lazy(() => import('./components/environment/Forest/Forest'));
+const Grass = lazy(() => import('./components/environment/Grass/Grass'));
+
 const LAST_SELECTED_ANIMAL_KEY = 'wild-trails:last-selected-animal';
 const MINIMAL_MARKERS_KEY = 'wild-trails:minimal-destination-markers';
 const WATER_APPROACH_POINTS = createWaterApproachPoints();
@@ -133,7 +146,7 @@ function getCommandOptions(point, selectedConfig) {
   return Array.from(new Map(options.map((option) => [option.type, option])).values());
 }
 
-function EcosystemActionMenu({ commandTarget, selectedConfig, onChoose, onClose }) {
+const EcosystemActionMenu = memo(function EcosystemActionMenu({ commandTarget, selectedConfig, onChoose, onClose }) {
   if (!commandTarget) return null;
   const options = getCommandOptions(commandTarget.point, selectedConfig);
   const x = Math.min(window.innerWidth - 220, Math.max(16, commandTarget.screen.x));
@@ -163,7 +176,7 @@ function EcosystemActionMenu({ commandTarget, selectedConfig, onChoose, onClose 
       </button>
     </div>
   );
-}
+});
 
 function getInitialSelectedAnimalId() {
   if (typeof window === 'undefined') return ANIMAL_LIST[0]?.id || 'moose';
@@ -201,6 +214,7 @@ class AnimalErrorBoundary extends Component {
   }
   componentDidCatch(error) {
     console.warn(`[AnimalError] ${this.props.animalId}:`, error.message);
+    this.props.onError?.(this.props.animalId);
   }
   render() {
     if (this.state.hasError) return null;
@@ -211,7 +225,7 @@ class AnimalErrorBoundary extends Component {
 /* ========================================
    Lighting
    ======================================== */
-function SceneLighting({ simMinutesRef }) {
+const SceneLighting = memo(function SceneLighting({ simMinutesRef }) {
   const dirLightRef = useRef();
   const ambientRef = useRef();
   const hemiRef = useRef();
@@ -283,6 +297,42 @@ function SceneLighting({ simMinutesRef }) {
       <hemisphereLight ref={hemiRef} skyColor="#8ed4ff" groundColor="#52752f" intensity={0.62} />
     </>
   );
+});
+
+function StartupSceneReporter({ loadStage, onFirstInteractiveFrame }) {
+  const { gl } = useThree();
+  const firstInteractiveFrameSent = useRef(false);
+  const statsTime = useRef(0);
+  const fpsWindow = useRef({ startedAt: 0, frames: 0 });
+
+  useEffect(() => {
+    markStartupPhase('renderer');
+    return undefined;
+  }, []);
+
+  useFrame(({ clock }) => {
+    if (loadStage >= 1 && !firstInteractiveFrameSent.current) {
+      firstInteractiveFrameSent.current = true;
+      markStartupPhase('render-first-frame', { stage: loadStage });
+      reportRuntimeStats(gl);
+      onFirstInteractiveFrame?.();
+    }
+
+    if (clock.elapsedTime - statsTime.current > 1) {
+      statsTime.current = clock.elapsedTime;
+      reportRuntimeStats(gl);
+    }
+
+    if (!fpsWindow.current.startedAt) fpsWindow.current.startedAt = clock.elapsedTime;
+    fpsWindow.current.frames += 1;
+    const elapsed = clock.elapsedTime - fpsWindow.current.startedAt;
+    if (elapsed >= 3) {
+      reportFpsSample(Math.round(fpsWindow.current.frames / elapsed));
+      fpsWindow.current = { startedAt: clock.elapsedTime, frames: 0 };
+    }
+  });
+
+  return null;
 }
 
 /* ========================================
@@ -291,11 +341,11 @@ function SceneLighting({ simMinutesRef }) {
 function CameraPositionReporter({ onUpdate }) {
   const { camera } = useThree();
 
-  // Report camera position every 500ms for minimap
+  // Report camera position at tier-appropriate rate for minimap
   useEffect(() => {
     const interval = setInterval(() => {
       onUpdate?.({ x: camera.position.x, y: camera.position.y, z: camera.position.z });
-    }, 500);
+    }, perfConfig.minimapUpdateRate);
     return () => clearInterval(interval);
   }, [camera, onUpdate]);
 
@@ -306,17 +356,58 @@ function CameraPositionReporter({ onUpdate }) {
    Arrival Detection threshold (world units)
    ======================================== */
 const ARRIVAL_THRESHOLD = 2.5;
+function getAnimalLoadOrder(selectedId) {
+  const selected = ANIMAL_LIST.find((animal) => animal.id === selectedId) || ANIMAL_LIST[0];
+  const [sx, , sz] = selected?.spawnPos || [0, 0, 0];
+  return [...ANIMAL_LIST]
+    .sort((a, b) => {
+      if (a.id === selected?.id) return -1;
+      if (b.id === selected?.id) return 1;
+      const [ax, , az] = a.spawnPos || [0, 0, 0];
+      const [bx, , bz] = b.spawnPos || [0, 0, 0];
+      return Math.hypot(ax - sx, az - sz) - Math.hypot(bx - sx, bz - sz);
+    })
+    .map((animal) => animal.id);
+}
 
 /* ========================================
    App Component
    ======================================== */
 export default function App() {
-  const [entered, setEntered] = useState(false);
+  // Progressive loading: 5 stages
+  // 0: Terrain + Sky + Lighting + Camera
+  // 1: Selected animal + Pond + essential UI (world becomes playable)
+  // 2: Grass + FloatingParticles
+  // 3: Forest + AssetManager + remaining animals
+  // 4: Fish + everything else (fully loaded)
   const [loadStage, setLoadStage] = useState(0);
+  const [firstInteractiveFrame, setFirstInteractiveFrame] = useState(false);
+  const [minimumLoadTimeElapsed, setMinimumLoadTimeElapsed] = useState(false);
+  const [nearbyGrassReady, setNearbyGrassReady] = useState(false);
+  const [nearbyTreesReady, setNearbyTreesReady] = useState(false);
+  const [streamDistantHabitat, setStreamDistantHabitat] = useState(false);
+  const [renderedAnimalIds, setRenderedAnimalIds] = useState([]);
+  const [readyAnimalIds, setReadyAnimalIds] = useState(() => new Set());
 
   // Selection
   const [selectedId, setSelectedId] = useState(getInitialSelectedAnimalId);
+  const initialSelectedId = useRef(getInitialSelectedAnimalId());
   const lastSelectedId = useRef(getStoredSelectedAnimalId() || getInitialSelectedAnimalId());
+  const initialAnimalIds = useMemo(
+    () => getAnimalLoadOrder(initialSelectedId.current).slice(0, INITIAL_ANIMAL_COUNT),
+    []
+  );
+  const initialAnimalsReady = initialAnimalIds.every((id) => readyAnimalIds.has(id));
+  const initialHabitatCenter = useMemo(() => {
+    const selected = ANIMAL_LIST.find((animal) => animal.id === initialSelectedId.current);
+    return selected?.spawnPos || [0, 0, 0];
+  }, []);
+  const nearbyHabitatReady = nearbyGrassReady && nearbyTreesReady;
+  const worldReady =
+    firstInteractiveFrame &&
+    minimumLoadTimeElapsed &&
+    initialAnimalsReady &&
+    nearbyHabitatReady;
 
   // Per-animal destinations
   const [destinations, setDestinations] = useState({});
@@ -353,6 +444,78 @@ export default function App() {
   const handleClockUpdate = useCallback((m) => {
     simMinutesRef.current = m;
   }, []);
+
+  useEffect(() => {
+    markStartupPhase('app-mounted');
+    markStartupPhase('initialize-camera');
+    markStartupPhase('initialize-terrain');
+    markStartupPhase('initialize-sky');
+    markStartupPhase('initialize-lighting');
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setMinimumLoadTimeElapsed(true), MIN_LOADING_SCREEN_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Load the selected animal first, then one nearby animal before entering.
+  useEffect(() => {
+    if (loadStage < 1) return;
+    setRenderedAnimalIds((current) => {
+      const nextId = initialAnimalIds.find((id) => !current.includes(id));
+      if (!nextId) return current;
+      const previousId = initialAnimalIds[initialAnimalIds.indexOf(nextId) - 1];
+      if (previousId && !readyAnimalIds.has(previousId)) return current;
+      return [...current, nextId];
+    });
+  }, [initialAnimalIds, loadStage, readyAnimalIds]);
+
+  // Once inside the world, stream one nearby animal during each quiet browser slot.
+  useEffect(() => {
+    if (!worldReady || renderedAnimalIds.length >= ANIMAL_LIST.length) return undefined;
+    if (renderedAnimalIds.some((id) => !readyAnimalIds.has(id))) return undefined;
+    const order = getAnimalLoadOrder(selectedId || lastSelectedId.current);
+    const nextId = order.find((id) => !renderedAnimalIds.includes(id));
+    if (!nextId) return undefined;
+
+    let timer;
+    let idleId;
+    const enqueue = () => {
+      timer = setTimeout(() => {
+        setRenderedAnimalIds((current) => (
+          current.includes(nextId) ? current : [...current, nextId]
+        ));
+      }, ANIMAL_MODEL_STREAM_INTERVAL);
+    };
+
+    if (typeof requestIdleCallback === 'function') {
+      idleId = requestIdleCallback(enqueue, { timeout: ANIMAL_MODEL_STREAM_INTERVAL });
+    } else {
+      enqueue();
+    }
+    return () => {
+      clearTimeout(timer);
+      if (idleId && typeof cancelIdleCallback === 'function') cancelIdleCallback(idleId);
+    };
+  }, [readyAnimalIds, renderedAnimalIds, selectedId, worldReady]);
+
+  useEffect(() => {
+    if (!worldReady) return undefined;
+    let timer;
+    let idleId;
+    const reveal = () => {
+      timer = setTimeout(() => setStreamDistantHabitat(true), 900);
+    };
+    if (typeof requestIdleCallback === 'function') {
+      idleId = requestIdleCallback(reveal, { timeout: 1400 });
+    } else {
+      reveal();
+    }
+    return () => {
+      clearTimeout(timer);
+      if (idleId && typeof cancelIdleCallback === 'function') cancelIdleCallback(idleId);
+    };
+  }, [worldReady]);
 
   useEffect(() => {
     try {
@@ -424,20 +587,59 @@ export default function App() {
     return () => clearInterval(interval);
   }, [activeMarker, completeActiveMarker, selectedId]);
 
-  // Progressive asset streaming
+  // Progressive startup phases. Stage 1 is the first playable slice; everything
+  // after that streams during idle time or timed gaps so Suspense never gates
+  // the first interactive frame.
   useEffect(() => {
-    if (!entered) {
-      setLoadStage(0);
-      return undefined;
-    }
+    let cancelled = false;
+    const idleIds = [];
+    const timers = [];
 
-    const timers = [
-      setTimeout(() => setLoadStage(1), 220),   // grass starts after first frame
-      setTimeout(() => setLoadStage(2), 850),   // forest follows
-      setTimeout(() => setLoadStage(3), 1500),  // remaining animals stream in
-    ];
-    return () => timers.forEach(clearTimeout);
-  }, [entered]);
+    const scheduleNextStage = (stage, fallbackMs) => {
+      const run = () => {
+        if (cancelled) return;
+        setLoadStage((current) => {
+          if (current >= stage) return current;
+          markStartupPhase(
+            stage === 1 ? 'spawn-nearby-animals' :
+              stage === 2 ? 'stream-grass-particles' :
+                stage === 3 ? 'stream-forest-ai' :
+                  'stream-fish-audio-particles',
+            { stage }
+          );
+          return stage;
+        });
+      };
+      if (typeof requestIdleCallback === 'function') {
+        const id = requestIdleCallback(run, { timeout: fallbackMs });
+        idleIds.push(id);
+        return id;
+      }
+      const id = setTimeout(run, fallbackMs);
+      timers.push(id);
+      return id;
+    };
+
+    const delay = (ms, fn) => {
+      const id = setTimeout(fn, ms);
+      timers.push(id);
+      return id;
+    };
+
+    markStartupPhase('initialize-renderer');
+    scheduleNextStage(1, 250);
+    delay(650, () => scheduleNextStage(2, 600));
+    delay(1400, () => scheduleNextStage(3, 900));
+    delay(2300, () => scheduleNextStage(4, 1000));
+
+    return () => {
+      cancelled = true;
+      timers.forEach(clearTimeout);
+      if (typeof cancelIdleCallback === 'function') {
+        idleIds.forEach(cancelIdleCallback);
+      }
+    };
+  }, []);
 
   // ---------- Handlers ----------
 
@@ -462,14 +664,17 @@ export default function App() {
     [selectedId]
   );
 
+  // Single click/tap → walk directly (no popup)
   const handleGroundClick = useCallback(
-    (point, screen) => {
+    (point) => {
       if (!selectedId) return;
-      setCommandTarget({ point, screen });
+      setCommandTarget(null);
+      issueCommand(point, COMMANDS.walk);
     },
-    [selectedId]
+    [selectedId, issueCommand]
   );
 
+  // Double-click → run
   const handleGroundDoubleClick = useCallback(
     (point) => {
       if (!selectedId) return;
@@ -478,9 +683,21 @@ export default function App() {
     [issueCommand, selectedId]
   );
 
+  // Long-press (mobile) or right-click (desktop) → context menu
+  const handleGroundLongPress = useCallback(
+    (point, screen) => {
+      if (!selectedId) return;
+      setCommandTarget({ point, screen });
+    },
+    [selectedId]
+  );
+
   const handleSelectAnimal = useCallback((id) => {
     setActiveMarker(null);
     setCommandTarget(null);
+    setRenderedAnimalIds((current) => (
+      current.includes(id) ? current : [id, ...current]
+    ));
 
     setSelectedId((current) => {
       if (current === id) {
@@ -501,6 +718,28 @@ export default function App() {
       return id;
     });
   }, [cameraMode]);
+
+  const handleAnimalReady = useCallback((id) => {
+    setReadyAnimalIds((current) => {
+      if (current.has(id)) return current;
+      const next = new Set(current);
+      next.add(id);
+      markStartupPhase('animal-ready', { id, ready: next.size });
+      return next;
+    });
+  }, []);
+
+  const handleNearbyGrassReady = useCallback(() => {
+    setNearbyGrassReady(true);
+  }, []);
+
+  const handleNearbyTreesReady = useCallback(() => {
+    setNearbyTreesReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (nearbyHabitatReady) markStartupPhase('nearby-glb-habitat-ready');
+  }, [nearbyHabitatReady]);
 
   const handleCameraModeChange = useCallback((mode) => {
     setCameraMode(mode);
@@ -539,6 +778,18 @@ export default function App() {
     });
   }, []);
 
+  const handleFirstInteractiveFrame = useCallback(() => {
+    setFirstInteractiveFrame(true);
+  }, []);
+
+  useEffect(() => {
+    if (worldReady) markStartupPhase('hide-loading-screen');
+  }, [worldReady]);
+
+  const handleReactRender = useCallback((id, _phase, actualDuration) => {
+    reportReactCommit(id, actualDuration);
+  }, []);
+
   // Force a behavior from the UI — clears after 12s (handled by AI)
   const handleForceAbility = useCallback((ability) => {
     if (!selectedId) return;
@@ -557,8 +808,9 @@ export default function App() {
   }, [selectedId]);
 
   // Camera target = selected animal position
+  const cameraTargetFallback = useMemo(() => new THREE.Vector3(), []);
   const cameraTarget = selectedId
-    ? animalPositions.current[selectedId] || new THREE.Vector3()
+    ? animalPositions.current[selectedId] || cameraTargetFallback
     : null;
 
   // State label for camera
@@ -570,35 +822,41 @@ export default function App() {
         ? 'Idle'
         : 'Idle';
 
-  // Auto-enter handler (called by LoadingScreen at ~30%)
-  const handleAutoEnter = useCallback(() => {
-    setEntered(true);
-  }, []);
 
   return (
     <>
-      <LoadingScreen entered={entered} onEnter={handleAutoEnter} />
+      <LoadingScreen
+        loadStage={loadStage}
+        worldReady={worldReady}
+        readyAnimals={readyAnimalIds.size}
+        initialAnimalCount={INITIAL_ANIMAL_COUNT}
+        nearbyHabitatReady={nearbyHabitatReady}
+      />
 
-      {entered && (
       <>
 
-      <HUD
-        selectedAnimalId={selectedId}
-        animalConfigs={ANIMAL_LIST}
-        animalStats={allStats}
-        animalBehaviors={allBehaviors}
-        animalPositions={animalPositionsSnapshot}
-        cameraMode={selectedId ? cameraMode : 'free'}
-        cameraPosition={cameraPosition}
-        cameraSettings={cameraSettings}
-        onCameraModeChange={handleCameraModeChange}
-        onCameraSettingsChange={setCameraSettings}
-        onSelectAnimal={handleSelectAnimal}
-        onForceAbility={handleForceAbility}
-        onClockUpdate={handleClockUpdate}
-        minimalDestinationMarkers={minimalDestinationMarkers}
-        onMinimalDestinationMarkersChange={setMinimalDestinationMarkers}
-      />
+      {worldReady && (
+      <Profiler id="HUD" onRender={handleReactRender}>
+        <HUD
+          selectedAnimalId={selectedId}
+          animalConfigs={ANIMAL_LIST}
+          animalStats={allStats}
+          animalBehaviors={allBehaviors}
+          animalPositions={animalPositionsSnapshot}
+          cameraMode={selectedId ? cameraMode : 'free'}
+          cameraPosition={cameraPosition}
+          cameraSettings={cameraSettings}
+          onCameraModeChange={handleCameraModeChange}
+          onCameraSettingsChange={setCameraSettings}
+          onSelectAnimal={handleSelectAnimal}
+          onForceAbility={handleForceAbility}
+          onClockUpdate={handleClockUpdate}
+          minimalDestinationMarkers={minimalDestinationMarkers}
+          onMinimalDestinationMarkersChange={setMinimalDestinationMarkers}
+          loadStage={loadStage}
+        />
+      </Profiler>
+      )}
 
       <EcosystemActionMenu
         commandTarget={commandTarget}
@@ -613,26 +871,79 @@ export default function App() {
         gl={GL_CONFIG}
         camera={CAMERA_CONFIG}
       >
+        <StartupSceneReporter
+          loadStage={loadStage}
+          onFirstInteractiveFrame={handleFirstInteractiveFrame}
+        />
         <SceneLighting simMinutesRef={simMinutesRef} />
         <Sky simMinutesRef={simMinutesRef} />
         <Terrain
           onClick={handleGroundClick}
           onDoubleClick={handleGroundDoubleClick}
+          onLongPress={handleGroundLongPress}
         />
         {loadStage >= 1 && (
           <Suspense fallback={null}>
-            <Grass />
+            <Grass
+              densityMultiplier={perfConfig.grassDensity}
+              center={initialHabitatCenter}
+              region="near"
+              nearRadius={24}
+              onReady={handleNearbyGrassReady}
+            />
           </Suspense>
         )}
-        <Pond />
-        {loadStage >= 1 && <Fish />}
-        <PondStream />
-        <FloatingParticles />
-
+        {streamDistantHabitat && (
+          <Suspense fallback={null}>
+            <Grass
+              densityMultiplier={perfConfig.grassDensity}
+              center={initialHabitatCenter}
+              region="distant"
+              nearRadius={24}
+              includeTall={HIGH_QUALITY_STREAMING}
+            />
+          </Suspense>
+        )}
+        {loadStage >= 1 && (
+          <Suspense fallback={null}>
+            <Pond />
+          </Suspense>
+        )}
+        {HIGH_QUALITY_STREAMING && loadStage >= 4 && (
+          <Suspense fallback={null}>
+            <Fish />
+          </Suspense>
+        )}
+        {loadStage >= 1 && (
+          <Suspense fallback={null}>
+            <PondStream detail={STREAM_DECOR && loadStage >= 2 ? 'full' : 'essential'} />
+          </Suspense>
+        )}
         {loadStage >= 2 && (
           <Suspense fallback={null}>
+            <FloatingParticles
+              dustCount={perfConfig.particleCount}
+              fireflyCount={perfConfig.fireflyCount}
+            />
+          </Suspense>
+        )}
+
+        {loadStage >= 1 && (
+          <Suspense fallback={null}>
             <AssetManager>
-              <Forest />
+              <Forest
+                center={initialHabitatCenter}
+                region="near"
+                nearRadius={30}
+                onReady={handleNearbyTreesReady}
+              />
+              {streamDistantHabitat && (
+                <Forest
+                  center={initialHabitatCenter}
+                  region="distant"
+                  nearRadius={30}
+                />
+              )}
             </AssetManager>
           </Suspense>
         )}
@@ -659,30 +970,34 @@ export default function App() {
           />
         )}
 
-        {/* Spawn all animals */}
-        {ANIMAL_LIST
-          .filter((cfg) => loadStage >= 3 || cfg.id === selectedId || (!selectedId && cfg.id === lastSelectedId.current))
+        {/* Real animals stream in priority order. Nothing rock-like is shown while a GLB parses. */}
+        {loadStage >= 1 && ANIMAL_LIST
+          .filter((cfg) => renderedAnimalIds.includes(cfg.id))
           .map((cfg) => (
-          <AnimalErrorBoundary key={cfg.id} animalId={cfg.id}>
-            <Suspense fallback={null}>
-              <Animal
-                config={cfg}
-                destination={destinations[cfg.id] || null}
-                destinationSerial={destinationSerials[cfg.id] || 0}
-                isRunning={runningFor[cfg.id] || false}
-                isSelected={selectedId === cfg.id}
-                forcedBehavior={forcedBehaviors[cfg.id] || null}
-                onSelect={handleSelectAnimal}
-                onPositionUpdate={handlePositionUpdate}
-                onStatsUpdate={handleStatsUpdate}
-                onBehaviorUpdate={handleBehaviorUpdate}
-              />
-            </Suspense>
-          </AnimalErrorBoundary>
-        ))}
+            <AnimalErrorBoundary
+              key={cfg.id}
+              animalId={cfg.id}
+              onError={handleAnimalReady}
+            >
+              <Suspense fallback={null}>
+                <Animal
+                  config={cfg}
+                  destination={destinations[cfg.id] || null}
+                  destinationSerial={destinationSerials[cfg.id] || 0}
+                  isRunning={runningFor[cfg.id] || false}
+                  isSelected={selectedId === cfg.id}
+                  forcedBehavior={forcedBehaviors[cfg.id] || null}
+                  onSelect={handleSelectAnimal}
+                  onPositionUpdate={handlePositionUpdate}
+                  onStatsUpdate={handleStatsUpdate}
+                  onBehaviorUpdate={handleBehaviorUpdate}
+                  onReady={handleAnimalReady}
+                />
+              </Suspense>
+            </AnimalErrorBoundary>
+          ))}
       </Canvas>
       </>
-      )}
     </>
   );
 }

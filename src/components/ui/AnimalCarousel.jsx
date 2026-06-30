@@ -1,4 +1,4 @@
-import { useRef, useCallback, useMemo, useState } from 'react';
+import { useRef, useCallback, useMemo, useState, memo } from 'react';
 import StatBar from './StatBar';
 import {
   SPECIES_EMOJIS,
@@ -15,12 +15,15 @@ import {
  *  - Species grouping toggle
  *  - Horizontal scroll with smooth momentum
  */
-export default function AnimalCarousel({
+function AnimalCarousel({
   animals = [],
   stats = {},
   behaviors = {},
   selectedId,
   onSelect,
+  isMobile = false,
+  expanded = false,
+  onToggleExpanded,
 }) {
   const scrollRef = useRef(null);
   const [grouped, setGrouped] = useState(false);
@@ -51,16 +54,39 @@ export default function AnimalCarousel({
     return groups;
   }, [animals]);
 
+  const visibleAnimals = useMemo(() => {
+    if (grouped || animals.length <= 36) return animals;
+    const selectedIndex = Math.max(0, animals.findIndex((cfg) => cfg.id === selectedId));
+    const windowSize = isMobile ? 18 : 28;
+    const half = Math.floor(windowSize / 2);
+    const start = Math.max(0, Math.min(selectedIndex - half, animals.length - windowSize));
+    return animals.slice(start, start + windowSize);
+  }, [animals, grouped, isMobile, selectedId]);
+
   return (
-    <div className="wt-carousel">
+    <div className={`wt-carousel ${isMobile ? 'wt-carousel--mobile' : ''} ${expanded ? 'wt-carousel--expanded' : ''}`}>
+      {isMobile && (
+        <button
+          className="wt-carousel__mobile-stack"
+          onClick={onToggleExpanded}
+          aria-expanded={expanded}
+          aria-label={expanded ? 'Close animal selection' : 'Choose an animal'}
+        >
+          <span>{SPECIES_EMOJIS[animals.find((animal) => animal.id === selectedId)?.species] || '🐾'}</span>
+          <small>{animals.length}</small>
+        </button>
+      )}
+
+      {(!isMobile || expanded) && (
+      <>
       {/* Grouping toggle */}
-      <button
+      {!isMobile && <button
         className="wt-carousel__group-toggle"
         onClick={() => setGrouped((g) => !g)}
         title={grouped ? 'Show all animals' : 'Group by species'}
       >
         {grouped ? '👤' : '👥'}
-      </button>
+      </button>}
 
       <div className="wt-carousel__track" ref={scrollRef}>
         {grouped ? (
@@ -100,39 +126,45 @@ export default function AnimalCarousel({
           })
         ) : (
           /* ── Individual Cards ── */
-          animals.map((cfg) => (
+          visibleAnimals.map((cfg) => (
             <AnimalCard
               key={cfg.id}
               config={cfg}
               stats={stats[cfg.id]}
               behavior={behaviors[cfg.id]}
               isSelected={selectedId === cfg.id}
-              onSelect={() => handleSelect(cfg.id)}
+              onSelect={handleSelect}
+              isMobile={isMobile}
             />
           ))
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }
 
 /* ── Single Animal Card ── */
-function AnimalCard({ config, stats, behavior, isSelected, onSelect }) {
+const AnimalCard = memo(function AnimalCard({ config, stats, behavior, isSelected, onSelect, isMobile }) {
   const species = config.species || config.id;
   const emoji = SPECIES_EMOJIS[species] || '🐾';
   const behaviorInfo = getBehaviorDisplay(behavior);
   const healthInfo = getHealthStatus(stats);
+  const handleClick = useCallback(() => onSelect?.(config.id), [config.id, onSelect]);
 
   return (
     <button
       className={`wt-carousel__card ${isSelected ? 'wt-carousel__card--selected' : ''}`}
       data-animal-id={config.id}
-      onClick={onSelect}
+      onClick={handleClick}
       aria-pressed={isSelected}
       title={`${config.displayName || config.name} — ${behaviorInfo.label}`}
     >
       <span className="wt-carousel__card-emoji">{emoji}</span>
-      <span className="wt-carousel__card-name">{config.displayName || config.name}</span>
+      <span className="wt-carousel__card-name">
+        {isMobile && !isSelected ? '' : config.displayName || config.name}
+      </span>
       <div className="wt-carousel__card-bars">
         <StatBar stat="energy"    value={stats?.energy ?? 100}    compact />
         <StatBar stat="hydration" value={stats?.hydration ?? 100} compact />
@@ -148,4 +180,6 @@ function AnimalCard({ config, stats, behavior, isSelected, onSelect }) {
       />
     </button>
   );
-}
+});
+
+export default memo(AnimalCarousel);

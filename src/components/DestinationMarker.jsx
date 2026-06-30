@@ -1,6 +1,5 @@
-import { useRef, useMemo, useEffect, useState } from 'react';
+import { useRef, useMemo, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 
 /**
@@ -13,7 +12,7 @@ import * as THREE from 'three';
  *  - On arrival: dissolves upward into leaf burst
  */
 
-const LEAF_COUNT = 10;
+const LEAF_COUNT = 6;
 const RUNE_SEGMENTS = 32;
 
 const MARKER_TYPES = {
@@ -219,7 +218,7 @@ function NatureGlyph({ type = 'walk', minimal = false, arrived }) {
         <meshBasicMaterial
           color={meta.primary}
           transparent
-          opacity={0.5}
+          opacity={0.38}
           side={THREE.DoubleSide}
           depthWrite={false}
         />
@@ -230,7 +229,7 @@ function NatureGlyph({ type = 'walk', minimal = false, arrived }) {
         <meshBasicMaterial
           color={meta.glow}
           transparent
-          opacity={0.25}
+          opacity={0.15}
           side={THREE.DoubleSide}
           depthWrite={false}
         />
@@ -268,35 +267,15 @@ export default function DestinationMarker({
   arrived = false,
   type = 'walk',
   minimal = false,
-  feedback = null,
+  _feedback = null,
 }) {
-  const [hovered, setHovered] = useState(false);
   if (!position) return null;
   const meta = getMarkerMeta(type);
 
   return (
-    <group
-      position={[position.x, position.y + 0.08, position.z]}
-      onPointerOver={(event) => {
-        event.stopPropagation();
-        setHovered(true);
-      }}
-      onPointerOut={() => setHovered(false)}
-    >
+    <group position={[position.x, position.y + 0.08, position.z]}>
       <NatureGlyph type={type} minimal={minimal} arrived={arrived} />
       <LeafParticles arrived={arrived} color={meta.particle} />
-      {!minimal && !arrived && hovered && (
-        <Html center distanceFactor={18} position={[0, 1.05, 0]} className="wt-marker-tooltip">
-          <span>{meta.icon}</span>
-          <strong>{meta.label}</strong>
-          <small>{meta.detail}</small>
-        </Html>
-      )}
-      {feedback && arrived && (
-        <Html center distanceFactor={16} position={[0, 1.35, 0]} className="wt-marker-feedback">
-          {feedback}
-        </Html>
-      )}
     </group>
   );
 }

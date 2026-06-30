@@ -1,14 +1,16 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, Suspense, lazy, useMemo, memo } from 'react';
 import TopBar from './TopBar';
 import AnimalPanel from './AnimalPanel';
 import AnimalCarousel from './AnimalCarousel';
-import SettingsDrawer from './SettingsDrawer';
 import MiniMap from './MiniMap';
-import NotificationFeed from './NotificationFeed';
-import SearchOverlay from './SearchOverlay';
-import LearningToggle from './LearningToggle';
 import DiscoveryPopup from './DiscoveryPopup';
-import EncyclopediaOverlay from './EncyclopediaOverlay';
+
+// Lazy-loaded overlays — only fetched when the user opens them
+const EncyclopediaOverlay = lazy(() => import('./EncyclopediaOverlay'));
+const SearchOverlay = lazy(() => import('./SearchOverlay'));
+const SettingsDrawer = lazy(() => import('./SettingsDrawer'));
+const NotificationFeed = lazy(() => import('./NotificationFeed'));
+const LearningToggle = lazy(() => import('./LearningToggle'));
 import useSimulationClock from '../../hooks/useSimulationClock';
 import useNotifications from '../../hooks/useNotifications';
 import { playSelect, playClick, playCameraMode, playPanelOpen, playPanelClose } from '../../hooks/useAudioFeedback';
@@ -28,7 +30,7 @@ import { SPECIES_EMOJIS } from '../../config/designTokens';
  *
  * All positioned via CSS fixed layout. Covers <20% of viewport.
  */
-export default function HUD({
+function HUD({
   // Animal data
   selectedAnimalId,
   animalConfigs = [],
@@ -48,8 +50,10 @@ export default function HUD({
   onMinimalDestinationMarkersChange,
   // Clock reporting (for Sky/Lighting)
   onClockUpdate,
+  // Progressive loading stage
+  loadStage = 4,
 }) {
-  const [panelCollapsed, setPanelCollapsed] = useState(false);
+  const [panelCollapsed, setPanelCollapsed] = useState(true);
   const [panelHidden, setPanelHidden] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -60,6 +64,7 @@ export default function HUD({
   });
   const [simSpeed, setSimSpeed] = useState(1);
   const [isMobile, setIsMobile] = useState(false);
+  const [animalTrayOpen, setAnimalTrayOpen] = useState(false);
   const collapseTimer = useRef(null);
 
   // Simulation clock
@@ -70,21 +75,30 @@ export default function HUD({
     onClockUpdate?.(clock.simMinutes);
   }, [clock.simMinutes, onClockUpdate]);
 
-  // Notifications
+  // Notifications — deferred until world is mostly loaded
   const { notifications, dismiss } = useNotifications(
-    animalConfigs,
-    animalBehaviors
+    loadStage >= 3 ? animalConfigs : [],
+    loadStage >= 3 ? animalBehaviors : {}
   );
 
   // Selected animal config
-  const selectedConfig = animalConfigs.find((c) => c.id === selectedAnimalId);
+  const selectedConfig = useMemo(
+    () => animalConfigs.find((c) => c.id === selectedAnimalId),
+    [animalConfigs, selectedAnimalId]
+  );
   const selectedStats = animalStats[selectedAnimalId] || {};
   const selectedBehavior = animalBehaviors[selectedAnimalId] || 'Idle';
 
   // Responsive breakpoint detection
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 768px)');
-    const handler = (e) => setIsMobile(e.matches);
+    const handler = (e) => {
+      setIsMobile(e.matches);
+      if (e.matches) {
+        setPanelHidden(true);
+        setPanelCollapsed(true);
+      }
+    };
     handler(mq);
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
@@ -138,12 +152,13 @@ export default function HUD({
 
     if (selectedAnimalId) {
       setPanelHidden(false);
-      setPanelCollapsed(false);
+      setPanelCollapsed(isMobile);
       if (collapseTimer.current) clearTimeout(collapseTimer.current);
+      if (isMobile) return undefined;
       collapseTimer.current = setTimeout(() => {
         setPanelCollapsed(true);
         collapseTimer.current = null;
-      }, isMobile ? 3600 : 5000);
+      }, 5000);
     }
     return () => {
       if (collapseTimer.current) clearTimeout(collapseTimer.current);
@@ -153,8 +168,13 @@ export default function HUD({
   // Select handler with audio
   const handleSelectAnimal = useCallback((id) => {
     onSelectAnimal?.(id);
+    if (isMobile) {
+      setAnimalTrayOpen(false);
+      setPanelHidden(false);
+      setPanelCollapsed(true);
+    }
     playSelect();
-  }, [onSelectAnimal]);
+  }, [isMobile, onSelectAnimal]);
 
   // Camera mode handler with audio
   const handleCameraMode = useCallback((mode) => {
@@ -173,12 +193,25 @@ export default function HUD({
       else playPanelClose();
       return !c;
     });
-  }, []);
+    if (isMobile) setAnimalTrayOpen(false);
+  }, [isMobile]);
 
   // Panel close (hide entirely)
   const handlePanelClose = useCallback(() => {
     playPanelClose();
     setPanelHidden(true);
+  }, []);
+
+  const handleAnimalTrayToggle = useCallback(() => {
+    setAnimalTrayOpen((open) => {
+      const next = !open;
+      if (next) {
+        setPanelHidden(true);
+        setPanelCollapsed(true);
+      }
+      return next;
+    });
+    playClick();
   }, []);
 
   // Settings toggle
@@ -192,6 +225,22 @@ export default function HUD({
     playClick();
   }, []);
 
+  const learningControls = useMemo(() => (
+    <>
+      <Suspense fallback={null}>
+        <LearningToggle active={learningMode} onToggle={handleLearningToggle} />
+      </Suspense>
+      <button
+        className="wt-topbar__icon-btn"
+        onClick={() => setEncyclopediaOpen(true)}
+        title="Wildlife Encyclopedia"
+        aria-label="Open encyclopedia"
+      >
+        📖
+      </button>
+    </>
+  ), [handleLearningToggle, learningMode]);
+
   return (
     <div id="wt-hud" className="wt-hud">
       {/* ── TOP ── */}
@@ -200,24 +249,16 @@ export default function HUD({
         timeOfDay={clock.timeOfDay}
         onSearchOpen={() => setSearchOpen(true)}
         onSettingsToggle={handleSettingsToggle}
-        extraButtons={
-          <>
-            <LearningToggle active={learningMode} onToggle={handleLearningToggle} />
-            <button
-              className="wt-topbar__icon-btn"
-              onClick={() => setEncyclopediaOpen(true)}
-              title="Wildlife Encyclopedia"
-              aria-label="Open encyclopedia"
-            >
-              📖
-            </button>
-          </>
-        }
+        extraButtons={learningControls}
       />
 
-      {/* ── LEFT: Selected Animal Panel ── */}
+      {/* ── LEFT / BOTTOM-SHEET: Selected Animal Panel ── */}
       {!panelHidden && (
-        <div className="wt-hud__left">
+        <div className={[
+          'wt-hud__left',
+          isMobile ? 'wt-hud__left--mobile' : '',
+          isMobile && panelCollapsed ? 'wt-hud__left--mobile-collapsed' : '',
+        ].filter(Boolean).join(' ')}>
           <AnimalPanel
             config={selectedConfig}
             stats={selectedStats}
@@ -227,6 +268,7 @@ export default function HUD({
             onToggleCollapse={handlePanelToggle}
             onClose={handlePanelClose}
             learningMode={learningMode}
+            isMobile={isMobile}
           />
         </div>
       )}
@@ -239,6 +281,9 @@ export default function HUD({
           behaviors={animalBehaviors}
           selectedId={selectedAnimalId}
           onSelect={handleSelectAnimal}
+          isMobile={isMobile}
+          expanded={animalTrayOpen}
+          onToggleExpanded={handleAnimalTrayToggle}
         />
       </div>
 
@@ -250,40 +295,56 @@ export default function HUD({
           selectedId={selectedAnimalId}
           cameraPosition={cameraPosition}
         />
-        <NotificationFeed
-          notifications={notifications}
-          onDismiss={dismiss}
-        />
+        {notifications.length > 0 && (
+          <Suspense fallback={null}>
+            <NotificationFeed
+              notifications={notifications}
+              onDismiss={dismiss}
+            />
+          </Suspense>
+        )}
       </div>
 
       {/* ── DRAWER: Settings ── */}
-      <SettingsDrawer
-        open={settingsOpen}
-        onToggle={handleSettingsToggle}
-        currentMode={cameraMode}
-        onModeChange={handleCameraMode}
-        cameraSettings={cameraSettings}
-        onCameraSettingsChange={onCameraSettingsChange}
-        simSpeed={simSpeed}
-        onSimSpeedChange={setSimSpeed}
-        minimalDestinationMarkers={minimalDestinationMarkers}
-        onMinimalDestinationMarkersChange={onMinimalDestinationMarkersChange}
-      />
+      {settingsOpen && (
+        <Suspense fallback={null}>
+          <SettingsDrawer
+            open={settingsOpen}
+            onToggle={handleSettingsToggle}
+            currentMode={cameraMode}
+            onModeChange={handleCameraMode}
+            cameraSettings={cameraSettings}
+            onCameraSettingsChange={onCameraSettingsChange}
+            simSpeed={simSpeed}
+            onSimSpeedChange={setSimSpeed}
+            minimalDestinationMarkers={minimalDestinationMarkers}
+            onMinimalDestinationMarkersChange={onMinimalDestinationMarkersChange}
+          />
+        </Suspense>
+      )}
 
-      {/* ── MODAL: Search Overlay ── */}
-      <SearchOverlay
-        animals={animalConfigs}
-        behaviors={animalBehaviors}
-        open={searchOpen}
-        onClose={() => setSearchOpen(false)}
-        onSelect={handleSelectAnimal}
-      />
+      {/* ── MODAL: Search Overlay (lazy-loaded) ── */}
+      {searchOpen && (
+        <Suspense fallback={null}>
+          <SearchOverlay
+            animals={animalConfigs}
+            behaviors={animalBehaviors}
+            open={searchOpen}
+            onClose={() => setSearchOpen(false)}
+            onSelect={handleSelectAnimal}
+          />
+        </Suspense>
+      )}
 
-      {/* ── MODAL: Encyclopedia ── */}
-      <EncyclopediaOverlay
-        open={encyclopediaOpen}
-        onClose={() => setEncyclopediaOpen(false)}
-      />
+      {/* ── MODAL: Encyclopedia (lazy-loaded) ── */}
+      {encyclopediaOpen && (
+        <Suspense fallback={null}>
+          <EncyclopediaOverlay
+            open={encyclopediaOpen}
+            onClose={() => setEncyclopediaOpen(false)}
+          />
+        </Suspense>
+      )}
 
       {/* ── Discovery Popup ── */}
       <DiscoveryPopup selectedAnimalId={selectedAnimalId} />
@@ -293,9 +354,18 @@ export default function HUD({
         selectedId={selectedAnimalId}
         animalConfigs={animalConfigs}
       />
+      {/* ── Streaming Indicator ── */}
+      {loadStage < 4 && (
+        <div className="wt-streaming-indicator" aria-live="polite">
+          <span className="wt-streaming-indicator__dot" />
+          Streaming World…
+        </div>
+      )}
     </div>
   );
 }
+
+export default memo(HUD);
 
 /* ── Selection Flash — brief popup on animal selection ── */
 function SelectionFlash({ selectedId, animalConfigs }) {

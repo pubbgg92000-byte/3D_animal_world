@@ -32,26 +32,39 @@ function groupByAsset(instances) {
   return groups;
 }
 
-export default function Forest() {
+export default function Forest({
+  center = [0, 0, 0],
+  region = 'all',
+  nearRadius = 24,
+  onReady,
+}) {
   const { forest } = useAssetManager();
   const generated = useMemo(
     () => generateForest(WORLD_SEED, forest.trees, forest.rocks),
     [forest.rocks, forest.trees]
   );
   const visibleTrees = useMemo(
-    () => generated.trees.filter((tree) => !isInWaterClearing(tree, 6.2)),
-    [generated.trees]
+    () => generated.trees.filter((tree) => {
+      if (isInWaterClearing(tree, 6.2)) return false;
+      const nearby = Math.hypot(tree.x - center[0], tree.z - center[2]) <= nearRadius;
+      return region === 'near' ? nearby : region === 'distant' ? !nearby : true;
+    }),
+    [center, generated.trees, nearRadius, region]
   );
   const visibleRocks = useMemo(
-    () => generated.rocks.filter((rock) => !isInWaterClearing(rock, 1.4)),
-    [generated.rocks]
+    () => generated.rocks.filter((rock) => {
+      if (isInWaterClearing(rock, 1.4)) return false;
+      const nearby = Math.hypot(rock.x - center[0], rock.z - center[2]) <= nearRadius;
+      return region === 'near' ? nearby : region === 'distant' ? !nearby : true;
+    }),
+    [center, generated.rocks, nearRadius, region]
   );
   const treeGroups = useMemo(() => groupByAsset(visibleTrees), [visibleTrees]);
   const rockGroups = useMemo(() => groupByAsset(visibleRocks), [visibleRocks]);
 
   useEffect(() => {
     registerStaticObstacles(
-      'asset-forest',
+      `asset-forest-${region}`,
       visibleTrees.map((tree) => {
         const asset = forest.trees[tree.assetIndex];
         return {
@@ -62,7 +75,7 @@ export default function Forest() {
       })
     );
     registerStaticObstacles(
-      'asset-rocks',
+      `asset-rocks-${region}`,
       visibleRocks.map((rock) => {
         const asset = forest.rocks[rock.assetIndex];
         return {
@@ -75,10 +88,15 @@ export default function Forest() {
       })
     );
     return () => {
-      unregisterStaticObstacles('asset-forest');
-      unregisterStaticObstacles('asset-rocks');
+      unregisterStaticObstacles(`asset-forest-${region}`);
+      unregisterStaticObstacles(`asset-rocks-${region}`);
     };
-  }, [forest.rocks, forest.trees, visibleRocks, visibleTrees]);
+  }, [forest.rocks, forest.trees, region, visibleRocks, visibleTrees]);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => onReady?.());
+    return () => cancelAnimationFrame(frame);
+  }, [onReady]);
 
   return (
     <group name="asset-forest">

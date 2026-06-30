@@ -122,6 +122,7 @@ export default function CameraController({
   const controlsRef = useRef();
   const { camera } = useThree();
   const isTransitioning = useRef(false);
+  const userControlUntil = useRef(0);
   const prevMode = useRef(mode);
   const transitionProgress = useRef(0);
 
@@ -159,6 +160,15 @@ export default function CameraController({
       controls.update();
       return;
     }
+
+    // Let manual orbit/pan/zoom breathe before follow mode pulls the camera
+    // target back to the animal. This makes right-drag panning and wheel zoom
+    // feel responsive instead of like the map is fighting the player.
+    if (performance.now() < userControlUntil.current) {
+      controls.update();
+      return;
+    }
+
     const animalPos = targetPosition;
 
     // Track velocity for anticipation (documentary-style)
@@ -257,6 +267,15 @@ export default function CameraController({
       touches={{
         ONE: THREE.TOUCH.ROTATE,
         TWO: THREE.TOUCH.DOLLY_PAN,
+      }}
+      onStart={() => {
+        userControlUntil.current = performance.now() + 900;
+      }}
+      onChange={() => {
+        userControlUntil.current = performance.now() + 260;
+      }}
+      onEnd={() => {
+        userControlUntil.current = performance.now() + 700;
       }}
       makeDefault
     />

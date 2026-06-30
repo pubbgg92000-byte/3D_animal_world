@@ -50,12 +50,18 @@ export default function TopBar({
           <span>{climate.location}</span>
           <span className="wt-topbar__separator">·</span>
           <span>{climate.timeZoneLabel}</span>
+          {climate.permission === 'granted' && (
+            <>
+              <span className="wt-topbar__separator">·</span>
+              <span title="Weather uses your current location">📍 Live local</span>
+            </>
+          )}
         </div>
 
         {/* Tutorial hint — auto-fades */}
         {showHint && (
           <div className="wt-topbar__hint">
-            Click to Move · Double Click to Run · Click Animal to Follow
+            Click to Move · Double Click to Run · Right Drag to Pan · Click Animal to Follow
           </div>
         )}
       </div>
