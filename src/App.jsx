@@ -7,7 +7,6 @@ import { ANIMAL_LIST } from './config/animalConfig';
 import perfConfig from './config/performanceConfig';
 
 // Components
-import Sky from './components/Sky';
 import CameraController from './components/CameraController';
 import LoadingScreen from './components/LoadingScreen';
 import DestinationMarker from './components/DestinationMarker';
@@ -25,6 +24,7 @@ import { markStartupPhase, reportFpsSample, reportReactCommit, reportRuntimeStat
 const CANVAS_DPR = [1, perfConfig.maxDPR];
 const SHADOW_CONFIG = perfConfig.enableShadows ? { type: THREE.PCFShadowMap } : false;
 const GL_CONFIG = {
+  alpha: false,
   antialias: perfConfig.tier !== 'low',
   toneMapping: THREE.ACESFilmicToneMapping,
   toneMappingExposure: 1.2,
@@ -37,9 +37,11 @@ const CAMERA_CONFIG = {
   position: [8, 5, 10],
 };
 const STREAM_DECOR = true;
-const INITIAL_ANIMAL_COUNT = ANIMAL_LIST.length;
-const MIN_LOADING_SCREEN_MS = 12000;
-const ANIMAL_MODEL_STREAM_INTERVAL = 650;
+const INITIAL_LOAD_RATIO = 0.3;
+const INITIAL_ANIMAL_COUNT = Math.max(1, Math.ceil(ANIMAL_LIST.length * INITIAL_LOAD_RATIO));
+const MIN_LOADING_SCREEN_MS = 3200;
+const ANIMAL_MODEL_STREAM_INTERVAL = 1100;
+const NEARBY_HABITAT_RADIUS = 37;
 const Animal = lazy(() => import('./components/Animal'));
 const Fish = lazy(() => import('./components/Fish'));
 const Pond = lazy(() => import('./components/Pond'));
@@ -271,7 +273,7 @@ const SceneLighting = memo(function SceneLighting({ simMinutesRef }) {
         intensity={2.15}
         color="#fff1cf"
         castShadow
-        shadow-mapSize={[2048, 2048]}
+        shadow-mapSize={[perfConfig.shadowMapSize, perfConfig.shadowMapSize]}
         shadow-camera-far={170}
         shadow-camera-left={-60}
         shadow-camera-right={60}
@@ -371,6 +373,7 @@ export default function App() {
   const [minimumLoadTimeElapsed, setMinimumLoadTimeElapsed] = useState(false);
   const [nearbyGrassReady, setNearbyGrassReady] = useState(false);
   const [nearbyTreesReady, setNearbyTreesReady] = useState(false);
+  const [backgroundStreamingEnabled, setBackgroundStreamingEnabled] = useState(false);
   const [streamDistantHabitat, setStreamDistantHabitat] = useState(false);
   const [renderedAnimalIds, setRenderedAnimalIds] = useState([]);
   const [readyAnimalIds, setReadyAnimalIds] = useState(() => new Set());
@@ -444,7 +447,7 @@ export default function App() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Load the selected animal first, then one nearby animal before entering.
+  // Load the selected animal and roughly 30% of wildlife before entering.
   useEffect(() => {
     if (loadStage < 1) return;
     setRenderedAnimalIds((current) => {
@@ -456,10 +459,12 @@ export default function App() {
     });
   }, [initialAnimalIds, loadStage, readyAnimalIds]);
 
-  // Once inside the world, stream one nearby animal during each quiet browser slot.
+  // After entry, stream the remaining wildlife during quiet browser slots. This
+  // schedule is time-based, never camera/animal-position based, so moving around
+  // the plain cannot trigger model parsing.
   useEffect(() => {
     if (
-      !worldReady ||
+      !backgroundStreamingEnabled ||
       renderedAnimalIds.length >= ANIMAL_LIST.length ||
       renderedAnimalIds.length >= perfConfig.maxRenderedAnimals
     ) return undefined;
@@ -488,25 +493,31 @@ export default function App() {
       clearTimeout(timer);
       if (idleId && typeof cancelIdleCallback === 'function') cancelIdleCallback(idleId);
     };
-  }, [readyAnimalIds, renderedAnimalIds, selectedId, worldReady]);
+  }, [backgroundStreamingEnabled, readyAnimalIds, renderedAnimalIds, selectedId]);
 
   useEffect(() => {
-    if (loadStage < 3) return undefined;
-    let timer;
-    let idleId;
-    const reveal = () => {
-      timer = setTimeout(() => setStreamDistantHabitat(true), 900);
+    if (!worldReady) return undefined;
+    const timers = [];
+    const idleIds = [];
+    const scheduleQuietly = (delay, callback, idleTimeout) => {
+      timers.push(setTimeout(() => {
+        if (typeof requestIdleCallback === 'function') {
+          idleIds.push(requestIdleCallback(callback, { timeout: idleTimeout }));
+        } else {
+          callback();
+        }
+      }, delay));
     };
-    if (typeof requestIdleCallback === 'function') {
-      idleId = requestIdleCallback(reveal, { timeout: 1400 });
-    } else {
-      reveal();
-    }
+
+    // Give the first interaction a clean window before any background work.
+    scheduleQuietly(1500, () => setBackgroundStreamingEnabled(true), 1600);
+    scheduleQuietly(5000, () => setStreamDistantHabitat(true), 2200);
+
     return () => {
-      clearTimeout(timer);
-      if (idleId && typeof cancelIdleCallback === 'function') cancelIdleCallback(idleId);
+      timers.forEach(clearTimeout);
+      if (typeof cancelIdleCallback === 'function') idleIds.forEach(cancelIdleCallback);
     };
-  }, [loadStage]);
+  }, [worldReady]);
 
   useEffect(() => {
     try {
@@ -875,7 +886,8 @@ export default function App() {
           onFirstInteractiveFrame={handleFirstInteractiveFrame}
         />
         <SceneLighting simMinutesRef={simMinutesRef} />
-        <Sky simMinutesRef={simMinutesRef} />
+        <color attach="background" args={['#78bce8']} />
+        <fog attach="fog" args={['#a9d1e8', 85, 230]} />
         <Terrain
           onClick={handleGroundClick}
           onDoubleClick={handleGroundDoubleClick}
@@ -887,7 +899,7 @@ export default function App() {
               densityMultiplier={perfConfig.grassDensity}
               center={initialHabitatCenter}
               region="near"
-              nearRadius={24}
+              nearRadius={NEARBY_HABITAT_RADIUS}
               onReady={handleNearbyGrassReady}
             />
           </Suspense>
@@ -898,7 +910,7 @@ export default function App() {
               densityMultiplier={perfConfig.grassDensity}
               center={initialHabitatCenter}
               region="distant"
-              nearRadius={24}
+              nearRadius={NEARBY_HABITAT_RADIUS}
               includeTall
             />
           </Suspense>
@@ -908,17 +920,17 @@ export default function App() {
             <Pond />
           </Suspense>
         )}
-        {loadStage >= 4 && (
+        {backgroundStreamingEnabled && (
           <Suspense fallback={null}>
             <Fish />
           </Suspense>
         )}
         {loadStage >= 1 && (
           <Suspense fallback={null}>
-            <PondStream detail={STREAM_DECOR && loadStage >= 2 ? 'full' : 'essential'} />
+            <PondStream detail={STREAM_DECOR && backgroundStreamingEnabled ? 'full' : 'essential'} />
           </Suspense>
         )}
-        {loadStage >= 2 && (
+        {backgroundStreamingEnabled && (
           <Suspense fallback={null}>
             <FloatingParticles
               dustCount={perfConfig.particleCount}
@@ -933,14 +945,14 @@ export default function App() {
               <Forest
                 center={initialHabitatCenter}
                 region="near"
-                nearRadius={30}
+                nearRadius={NEARBY_HABITAT_RADIUS}
                 onReady={handleNearbyTreesReady}
               />
               {streamDistantHabitat && (
                 <Forest
                   center={initialHabitatCenter}
                   region="distant"
-                  nearRadius={30}
+                  nearRadius={NEARBY_HABITAT_RADIUS}
                 />
               )}
             </AssetManager>

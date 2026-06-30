@@ -79,22 +79,11 @@ async function fetchClimate(latitude, longitude) {
   weatherUrl.searchParams.set('current', 'temperature_2m,relative_humidity_2m,precipitation,rain,showers,weather_code,is_day');
   weatherUrl.searchParams.set('timezone', 'auto');
 
-  const placeUrl = new URL('https://geocoding-api.open-meteo.com/v1/reverse');
-  placeUrl.searchParams.set('latitude', latitude);
-  placeUrl.searchParams.set('longitude', longitude);
-  placeUrl.searchParams.set('count', '1');
-  placeUrl.searchParams.set('language', 'en');
-  placeUrl.searchParams.set('format', 'json');
-
-  const [weatherResponse, placeResponse] = await Promise.all([
-    fetch(weatherUrl),
-    fetch(placeUrl),
-  ]);
+  const weatherResponse = await fetch(weatherUrl);
 
   if (!weatherResponse.ok) throw new Error('Weather unavailable');
 
   const weather = await weatherResponse.json();
-  const place = placeResponse.ok ? await placeResponse.json() : null;
   const current = weather.current || {};
   const measuredRain =
     (Number.isFinite(current.rain) ? current.rain : 0) +
@@ -103,12 +92,6 @@ async function fetchClimate(latitude, longitude) {
   const weatherState = measuredRain > 0
     ? { icon: '🌧️', label: measuredRain >= 2 ? 'Rain' : 'Light Rain' }
     : WEATHER_CODES[current.weather_code] || WEATHER_CODES[0];
-  const placeResult = place?.results?.[0];
-  const location = [placeResult?.name, placeResult?.admin1, placeResult?.country_code]
-    .filter(Boolean)
-    .slice(0, 2)
-    .join(', ');
-
   return {
     icon: current.is_day === 0 && current.weather_code === 0 ? '🌙' : weatherState.icon,
     label: weatherState.label,
@@ -123,7 +106,6 @@ async function fetchClimate(latitude, longitude) {
       : null,
     rain: Number.isFinite(current.rain) ? current.rain : null,
     showers: Number.isFinite(current.showers) ? current.showers : null,
-    location: location || null,
     coordinatesLabel: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
     latitude,
     longitude,

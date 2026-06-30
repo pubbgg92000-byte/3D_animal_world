@@ -58,7 +58,7 @@ export function generateForest(seed, treeAssets, rockAssets) {
   clusters.push({ x: -42, z: -28 }, { x: -48, z: -12 }, { x: -28, z: -45 });
 
   let attempts = 0;
-  while (trees.length < 250 && attempts++ < 2000) {
+  while (trees.length < 180 && attempts++ < 1600) {
     const cluster = clusters[Math.floor(random() * clusters.length)];
     const x = cluster.x + gaussian(random) * (5.5 + random() * 3.5);
     const z = cluster.z + gaussian(random) * (5.5 + random() * 3.5);

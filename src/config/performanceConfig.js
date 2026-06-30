@@ -6,16 +6,16 @@
  */
 export const perfConfig = {
   tier: 'high',
-  shadowMapSize: 2048,
-  grassDensity: 1.0,
-  particleCount: 300,
-  fireflyCount: 50,
-  maxDPR: 1.35,
+  shadowMapSize: 1024,
+  grassDensity: 0.72,
+  particleCount: 180,
+  fireflyCount: 30,
+  maxDPR: 1.0,
   enableBlur: true,
   minimapUpdateRate: 500,
   treeDetailDistance: 80,
   enableShadows: true,
-  maxRenderedAnimals: 999,
+  maxRenderedAnimals: 11,
 };
 
 export function isMobileDevice() {

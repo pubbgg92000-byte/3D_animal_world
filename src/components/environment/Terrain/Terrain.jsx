@@ -123,7 +123,12 @@ export default function Terrain({ onClick, onDoubleClick, onLongPress, onContext
         onContextMenu?.(event.point.clone(), getScreen(event.nativeEvent));
       }}
     >
-      <meshStandardMaterial vertexColors roughness={0.94} metalness={0} />
+      <meshStandardMaterial
+        color="#3f7738"
+        vertexColors
+        roughness={0.94}
+        metalness={0}
+      />
     </mesh>
   );
 }
