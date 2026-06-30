@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react';
+import { useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -123,71 +123,77 @@ export default function CameraController({
   const controlsRef = useRef();
   const { camera } = useThree();
   const isTransitioning = useRef(false);
-  const userControlUntil = useRef(0);
+  const isUserInteracting = useRef(false);
   const prevMode = useRef(mode);
   const prevFocusKey = useRef(focusKey);
-  const transitionProgress = useRef(0);
+  const transitionUntil = useRef(0);
+  const initializedTarget = useRef(false);
 
-  // Velocity tracking for anticipation
+  // Reused frame vectors: avoids camera GC spikes while the animal is moving.
   const prevTargetPos = useRef(new THREE.Vector3());
   const targetVelocity = useRef(new THREE.Vector3());
+  const smoothedVelocity = useRef(new THREE.Vector3());
+  const desiredTarget = useRef(new THREE.Vector3());
+  const desiredPos = useRef(new THREE.Vector3());
+  const oldTarget = useRef(new THREE.Vector3());
+  const targetDelta = useRef(new THREE.Vector3());
+  const predictedAnimal = useRef(new THREE.Vector3());
+  const presetOffset = useRef(new THREE.Vector3());
+  const tempVec = useRef(new THREE.Vector3());
 
   const config = MODES[mode] || MODES.follow;
 
-  // Trigger smooth transition when mode changes
-  useEffect(() => {
-    if (prevMode.current !== mode) {
-      isTransitioning.current = true;
-      transitionProgress.current = 0;
-      prevMode.current = mode;
-      // Transition completes after ~2 seconds
-      const timer = setTimeout(() => {
-        isTransitioning.current = false;
-      }, 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [mode]);
-
-  useEffect(() => {
-    if (prevFocusKey.current === focusKey) return;
-    prevFocusKey.current = focusKey;
-    isTransitioning.current = true;
-    transitionProgress.current = 0;
-    userControlUntil.current = 0;
-    const timer = setTimeout(() => {
-      isTransitioning.current = false;
-    }, 1600);
-    return () => clearTimeout(timer);
-  }, [focusKey]);
-
-  useFrame((_, delta) => {
+  useFrame(({ clock }, delta) => {
     if (!controlsRef.current) return;
+
+    const controls = controlsRef.current;
+    const now = clock.elapsedTime;
+    const safeDelta = Math.min(delta, 1 / 30);
+
+    // Mode/focus transitions are tracked in the render loop so camera motion
+    // never depends on React timers or state updates.
+    if (prevMode.current !== mode) {
+      prevMode.current = mode;
+      transitionUntil.current = now + 1.6;
+      isTransitioning.current = true;
+    }
+
+    if (prevFocusKey.current !== focusKey) {
+      prevFocusKey.current = focusKey;
+      transitionUntil.current = now + 1.35;
+      isTransitioning.current = true;
+      initializedTarget.current = false;
+    }
+
+    isTransitioning.current = now < transitionUntil.current;
 
     // Dynamic FOV
     if (Math.abs(camera.fov - fov) > 0.5) {
-      camera.fov += (fov - camera.fov) * springFactor(2.0, delta);
+      camera.fov += (fov - camera.fov) * springFactor(2.0, safeDelta);
       camera.updateProjectionMatrix();
     }
 
-    const controls = controlsRef.current;
     if (!targetPosition) {
-      controls.update();
-      return;
-    }
-
-    // Let manual orbit/pan/zoom breathe before follow mode pulls the camera
-    // target back to the animal. This makes right-drag panning and wheel zoom
-    // feel responsive instead of like the map is fighting the player.
-    if (performance.now() < userControlUntil.current) {
       controls.update();
       return;
     }
 
     const animalPos = targetPosition;
 
-    // Track velocity for anticipation (documentary-style)
-    targetVelocity.current.subVectors(animalPos, prevTargetPos.current).divideScalar(Math.max(delta, 0.001));
+    if (!initializedTarget.current) {
+      prevTargetPos.current.copy(animalPos);
+      targetVelocity.current.set(0, 0, 0);
+      smoothedVelocity.current.set(0, 0, 0);
+      initializedTarget.current = true;
+    }
+
+    // Smooth velocity prediction keeps fast direction changes from kicking the
+    // camera to a new offset in one frame.
+    targetVelocity.current
+      .subVectors(animalPos, prevTargetPos.current)
+      .divideScalar(Math.max(safeDelta, 0.001));
     prevTargetPos.current.copy(animalPos);
+    smoothedVelocity.current.lerp(targetVelocity.current, springFactor(5.5, safeDelta));
 
     // In free mode, don't auto-follow
     if (mode === 'free') {
@@ -198,60 +204,51 @@ export default function CameraController({
     const offset = config.offset;
     if (!offset) return;
 
-    // ── Anticipation: slightly offset target in movement direction ──
-    const speed = targetVelocity.current.length();
-    const anticipation = new THREE.Vector3();
+    predictedAnimal.current.copy(animalPos);
+    const speed = smoothedVelocity.current.length();
     if (speed > 0.5 && mode === 'follow') {
-      anticipation.copy(targetVelocity.current)
+      tempVec.current
+        .copy(smoothedVelocity.current)
         .normalize()
-        .multiplyScalar(Math.min(speed * 0.15, 2.0));
+        .multiplyScalar(Math.min(speed * 0.08, 1.35));
+      predictedAnimal.current.add(tempVec.current);
     }
 
-    // Compute desired camera position
-    const desiredPos = new THREE.Vector3(
-      animalPos.x + offset.x,
-      animalPos.y + offset.y,
-      animalPos.z + offset.z
+    desiredTarget.current.set(animalPos.x, animalPos.y + config.lookAtHeight, animalPos.z);
+    desiredPos.current.set(
+      predictedAnimal.current.x + offset.x,
+      predictedAnimal.current.y + offset.y,
+      predictedAnimal.current.z + offset.z
     );
 
-    // Compute desired lookAt target (with anticipation)
-    const desiredTarget = new THREE.Vector3(
-      animalPos.x + anticipation.x * 0.5,
-      animalPos.y + config.lookAtHeight,
-      animalPos.z + anticipation.z * 0.5
-    );
-
-    // ── Spring-based transitions ──
-    // smoothness scales all spring constants (0.1 = very smooth, 1 = snappy)
+    // A single damping pass drives the follow target; OrbitControls damping is
+    // disabled below so controls and manual camera movement do not double-smooth.
     const smoothScale = 0.3 + smoothness * 1.4;
     const transSpring = isTransitioning.current ? 3.0 * smoothScale : config.positionSpring * smoothScale;
-    const targetSpring = config.targetSpring * smoothScale;
+    const targetSpring = (mode === 'follow' ? 10.0 : config.targetSpring) * smoothScale;
 
-    const posFactor = springFactor(transSpring, delta);
-    const tgtFactor = springFactor(targetSpring, delta);
+    const posFactor = springFactor(transSpring, safeDelta);
+    const tgtFactor = springFactor(targetSpring, safeDelta);
 
-    // Update OrbitControls target (what camera looks at)
-    controls.target.lerp(desiredTarget, tgtFactor);
+    oldTarget.current.copy(controls.target);
+    controls.target.lerp(desiredTarget.current, tgtFactor);
+    targetDelta.current.subVectors(controls.target, oldTarget.current);
 
     // Position behavior depends on mode
     if (isTransitioning.current || config.forcePosition) {
       // Full position tracking during transitions or FPV
-      camera.position.lerp(desiredPos, posFactor);
+      camera.position.lerp(desiredPos.current, posFactor);
     } else if (mode !== 'free') {
-      // Smoothly nudge camera to track animal while preserving user orbit
-      const currentOffset = camera.position.clone().sub(controls.target);
-      const newPos = desiredTarget.clone().add(currentOffset);
-      camera.position.lerp(newPos, posFactor);
-    }
+      // Move the camera by the same delta as the controls target. This keeps
+      // user orbit, zoom, and touch gestures intact without letting follow drift.
+      camera.position.add(targetDelta.current);
 
-    // Keep the follow camera above tree canopies and terrain
-    if (mode === 'follow') {
-      camera.position.y = Math.max(camera.position.y, animalPos.y + 8.25);
-    }
-
-    // Increment transition progress
-    if (isTransitioning.current) {
-      transitionProgress.current += delta;
+      if (!isUserInteracting.current && mode === 'follow') {
+        presetOffset.current.copy(offset);
+        tempVec.current.subVectors(camera.position, controls.target);
+        tempVec.current.lerp(presetOffset.current, springFactor(0.45, safeDelta));
+        camera.position.copy(controls.target).add(tempVec.current);
+      }
     }
 
     controls.update();
@@ -265,8 +262,8 @@ export default function CameraController({
       zoomSpeed={zoomSpeed}
       panSpeed={1.2}
       enableRotate={true}
-      enableDamping={true}
-      dampingFactor={0.06}
+      enableDamping={false}
+      dampingFactor={0}
       autoRotate={config.autoRotate && mooseState === 'Idle'}
       autoRotateSpeed={config.autoRotateSpeed}
       minDistance={config.minDistance}
@@ -274,8 +271,8 @@ export default function CameraController({
       minPolarAngle={config.minPolarAngle}
       maxPolarAngle={config.maxPolarAngle}
       mouseButtons={{
-        LEFT: THREE.MOUSE.ROTATE,
-        MIDDLE: THREE.MOUSE.DOLLY,
+        // Leave primary click to R3F meshes so animal inspection/selection works.
+        MIDDLE: THREE.MOUSE.ROTATE,
         RIGHT: THREE.MOUSE.PAN,
       }}
       touches={{
@@ -283,13 +280,10 @@ export default function CameraController({
         TWO: THREE.TOUCH.DOLLY_PAN,
       }}
       onStart={() => {
-        userControlUntil.current = performance.now() + 900;
-      }}
-      onChange={() => {
-        userControlUntil.current = performance.now() + 260;
+        isUserInteracting.current = true;
       }}
       onEnd={() => {
-        userControlUntil.current = performance.now() + 700;
+        isUserInteracting.current = false;
       }}
       makeDefault
     />

@@ -19,6 +19,7 @@ import {
   getTerrainHeight,
   isWaterAt,
 } from './utils/world';
+import { getSunIntensity, getSunVector } from './utils/solar';
 import { markStartupPhase, reportFpsSample, reportReactCommit, reportRuntimeStats } from './utils/startupProfiler';
 
 const CANVAS_DPR = [1, perfConfig.maxDPR];
@@ -213,34 +214,41 @@ class AnimalErrorBoundary extends Component {
 /* ========================================
    Lighting
    ======================================== */
+const _sceneSunDir = new THREE.Vector3();
+
 const SceneLighting = memo(function SceneLighting({ simMinutesRef }) {
   const dirLightRef = useRef();
   const ambientRef = useRef();
   const hemiRef = useRef();
+  const climateRef = useRef({ latitude: 17.385 });
+
+  useEffect(() => {
+    const handler = (event) => {
+      climateRef.current = event.detail || climateRef.current;
+    };
+    window.addEventListener('wild-trails:climate', handler);
+    return () => window.removeEventListener('wild-trails:climate', handler);
+  }, []);
 
   // Animate lighting based on time of day
   useFrame(() => {
     const m = simMinutesRef?.current ?? 540;
     const hour = m / 60;
-    // Sun position: rises east, arcs overhead, sets west
-    const sunAngle = ((hour - 6) / 12) * Math.PI; // 0 at 6am, π at 6pm
-    const sunHeight = Math.sin(sunAngle);
-    const isDay = hour >= 5.5 && hour <= 20.5;
+    const latitude = climateRef.current?.latitude ?? 17.385;
+    const sunIntensity = getSunIntensity(hour, latitude);
+    const isDay = sunIntensity > 0.04;
 
     if (dirLightRef.current) {
-      // Sun position
-      const sx = Math.cos(sunAngle) * 55;
-      const sy = Math.max(5, sunHeight * 55);
-      const sz = -30;
-      dirLightRef.current.position.set(sx, sy, sz);
+      // Real-world orientation: +X east at sunrise, -X west at sunset.
+      getSunVector(hour, latitude, _sceneSunDir);
+      dirLightRef.current.position.set(
+        _sceneSunDir.x * 55,
+        Math.max(5, _sceneSunDir.y * 55),
+        _sceneSunDir.z * 55
+      );
 
       // Intensity: bright midday, dim at dawn/dusk, very dim at night
-      let intensity = 2.15;
-      if (hour < 6) intensity = 0.1;
-      else if (hour < 8) intensity = 0.4 + ((hour - 6) / 2) * 1.75;
-      else if (hour > 18) intensity = Math.max(0.1, 2.15 - ((hour - 18) / 2.5) * 2.05);
-      else if (hour > 20) intensity = 0.1;
-      dirLightRef.current.intensity = intensity;
+      dirLightRef.current.intensity = Math.max(0.1, 2.15 * sunIntensity);
 
       // Color temperature: warm at dawn/dusk, neutral midday
       let r = 1, g = 0.945, b = 0.81; // default warm white

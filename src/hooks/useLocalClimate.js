@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 const WEATHER_CODES = {
   0: { icon: '☀️', label: 'Clear' },
@@ -55,6 +55,11 @@ function getTimezoneDetails() {
   };
 }
 
+function formatTimeZoneLabel(timeZone, abbreviation) {
+  const city = timeZone?.includes('/') ? titleCase(timeZone.split('/').at(-1)) : timeZone;
+  return [city, abbreviation].filter(Boolean).join(' ') || 'Local Time';
+}
+
 function getSeason(date, latitude, longitude) {
   const month = date.getMonth();
   const isIndiaRegion =
@@ -106,9 +111,12 @@ async function fetchClimate(latitude, longitude) {
       : null,
     rain: Number.isFinite(current.rain) ? current.rain : null,
     showers: Number.isFinite(current.showers) ? current.showers : null,
-    coordinatesLabel: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
+    coordinatesLabel: `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`,
     latitude,
     longitude,
+    timeZone: weather.timezone || null,
+    timeZoneLabel: formatTimeZoneLabel(weather.timezone, weather.timezone_abbreviation),
+    utcOffsetSeconds: weather.utc_offset_seconds,
   };
 }
 
@@ -160,6 +168,53 @@ export default function useLocalClimate() {
     permission: 'prompt',
   });
 
+  const applyTimezoneClimate = useCallback(async (permission = 'timezone') => {
+    try {
+      const climate = await fetchTimezoneClimate(
+        timezoneDetails.timeZone,
+        timezoneDetails.fallbackLocation
+      );
+      setSnapshot((current) => ({
+        ...current,
+        ...climate,
+        season: getSeason(new Date(), climate.latitude, climate.longitude),
+        permission,
+      }));
+    } catch {
+      setSnapshot((current) => ({
+        ...current,
+        season: getSeason(new Date(), current.latitude, current.longitude),
+      }));
+    }
+  }, [timezoneDetails.fallbackLocation, timezoneDetails.timeZone]);
+
+  const requestPreciseLocation = useCallback(() => {
+    if (!navigator.geolocation) {
+      applyTimezoneClimate('unavailable');
+      return;
+    }
+
+    setSnapshot((current) => ({ ...current, permission: 'requesting' }));
+    navigator.geolocation.getCurrentPosition(
+      async ({ coords }) => {
+        try {
+          const climate = await fetchClimate(coords.latitude, coords.longitude);
+          setSnapshot((current) => ({
+            ...current,
+            ...climate,
+            location: 'Current location',
+            season: getSeason(new Date(), climate.latitude, climate.longitude),
+            permission: 'granted',
+          }));
+        } catch {
+          applyTimezoneClimate('timezone');
+        }
+      },
+      () => applyTimezoneClimate('denied'),
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 15 * 60 * 1000 }
+    );
+  }, [applyTimezoneClimate]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -173,64 +228,17 @@ export default function useLocalClimate() {
 
     const seasonTimer = setInterval(applyFallbackSeason, 60 * 60 * 1000);
 
-    const applyTimezoneClimate = async (permission = 'timezone') => {
-      try {
-        const climate = await fetchTimezoneClimate(
-          timezoneDetails.timeZone,
-          timezoneDetails.fallbackLocation
-        );
-        if (cancelled) return;
-        setSnapshot((current) => ({
-          ...current,
-          ...climate,
-          season: getSeason(new Date(), climate.latitude, climate.longitude),
-          permission,
-        }));
-      } catch {
-        applyFallbackSeason();
-      }
-    };
-
-    const applyPreciseLocation = () => {
-      if (!navigator.geolocation) {
-        applyTimezoneClimate('timezone');
-        return;
-      }
-
-      navigator.geolocation.getCurrentPosition(
-        async ({ coords }) => {
-          try {
-            const climate = await fetchClimate(coords.latitude, coords.longitude);
-            if (cancelled) return;
-            setSnapshot((current) => ({
-              ...current,
-              ...climate,
-              season: getSeason(new Date(), climate.latitude, climate.longitude),
-              permission: 'granted',
-            }));
-          } catch {
-            applyTimezoneClimate('timezone');
-          }
-        },
-        () => {
-          if (cancelled) return;
-          applyTimezoneClimate('denied');
-        },
-        { enableHighAccuracy: false, timeout: 8000, maximumAge: 15 * 60 * 1000 }
-      );
-    };
-
-    applyPreciseLocation();
+    applyTimezoneClimate('timezone');
 
     return () => {
       cancelled = true;
       clearInterval(seasonTimer);
     };
-  }, [timezoneDetails.fallbackLocation, timezoneDetails.timeZone]);
+  }, [applyTimezoneClimate]);
 
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('wild-trails:climate', { detail: snapshot }));
   }, [snapshot]);
 
-  return snapshot;
+  return { ...snapshot, requestPreciseLocation };
 }

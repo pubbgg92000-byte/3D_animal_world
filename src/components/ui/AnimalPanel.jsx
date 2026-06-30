@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect, memo } from 'react';
+import { ChevronDown } from 'lucide-react';
 import StatBar from './StatBar';
 import AbilityChip from './AbilityChip';
 import {
@@ -106,7 +107,7 @@ function AnimalPanel({
             Details
           </span>
           <span className={`wt-animal-panel__chevron ${collapsed ? '' : 'wt-animal-panel__chevron--open'}`}>
-            {collapsed ? '▾' : '▴'}
+            <ChevronDown aria-hidden="true" />
           </span>
         </button>
         <button

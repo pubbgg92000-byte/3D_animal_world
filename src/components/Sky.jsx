@@ -2,6 +2,7 @@ import { useRef, useMemo, useEffect, useState } from 'react';
 import { Cloud } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { getSunIntensity, getSunVector } from '../utils/solar';
 
 /* ========================================
    Sky — Procedural time-of-day atmosphere
@@ -153,20 +154,11 @@ export default function Sky({ simMinutesRef }) {
       u.uZenith.value.set(...preset.zenith);
       u.uHorizon.value.set(...preset.horizon);
 
-      // Sun direction from hour
-      const sunAngle = ((hour - 6) / 12) * Math.PI;
-      const sunHeight = Math.sin(sunAngle);
-      const sunX = Math.cos(sunAngle);
-      _sunDir.set(sunX, Math.max(-0.2, sunHeight), -0.3).normalize();
+      // Real-world orientation: +X east at sunrise, -X west at sunset.
+      getSunVector(hour, climate.latitude, _sunDir);
       u.uSunDir.value.copy(_sunDir);
 
-      // Sun intensity (0 at night, 1 midday)
-      const isDay = hour >= 5.5 && hour <= 20.5;
-      let intensity = 0;
-      if (hour >= 5.5 && hour < 7) intensity = (hour - 5.5) / 1.5;
-      else if (hour >= 7 && hour <= 18) intensity = 1;
-      else if (hour > 18 && hour <= 20.5) intensity = 1 - (hour - 18) / 2.5;
-      u.uSunIntensity.value = intensity;
+      u.uSunIntensity.value = getSunIntensity(hour, climate.latitude);
     }
 
     // Update fog

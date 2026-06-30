@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useRef, Suspense, lazy, useMemo, memo } from 'react';
+import { BookOpen } from 'lucide-react';
 import TopBar from './TopBar';
 import AnimalPanel from './AnimalPanel';
 import AnimalCarousel from './AnimalCarousel';
+import CompassWidget from './CompassWidget';
 import MiniMap from './MiniMap';
 import DiscoveryPopup from './DiscoveryPopup';
 
@@ -12,6 +14,7 @@ const SettingsDrawer = lazy(() => import('./SettingsDrawer'));
 const NotificationFeed = lazy(() => import('./NotificationFeed'));
 const LearningToggle = lazy(() => import('./LearningToggle'));
 import useSimulationClock from '../../hooks/useSimulationClock';
+import useLocalClimate from '../../hooks/useLocalClimate';
 import useNotifications from '../../hooks/useNotifications';
 import { playSelect, playClick, playCameraMode, playPanelOpen, playPanelClose } from '../../hooks/useAudioFeedback';
 import { SPECIES_EMOJIS } from '../../config/designTokens';
@@ -69,6 +72,7 @@ function HUD({
 
   // Simulation clock
   const clock = useSimulationClock(simSpeed);
+  const climate = useLocalClimate();
 
   // Report simMinutes upstream so Sky/Lighting can use it
   useEffect(() => {
@@ -182,6 +186,14 @@ function HUD({
     playCameraMode();
   }, [onCameraModeChange]);
 
+  const handleForceAbility = useCallback((ability) => {
+    onForceAbility?.(ability);
+    if (isMobile) {
+      setPanelCollapsed(true);
+      setAnimalTrayOpen(false);
+    }
+  }, [isMobile, onForceAbility]);
+
   // Panel toggle with audio
   const handlePanelToggle = useCallback(() => {
     if (collapseTimer.current) {
@@ -235,8 +247,9 @@ function HUD({
         onClick={() => setEncyclopediaOpen(true)}
         title="Wildlife Encyclopedia"
         aria-label="Open encyclopedia"
+        data-tooltip="Open the wildlife encyclopedia"
       >
-        📖
+        <BookOpen aria-hidden="true" />
       </button>
     </>
   ), [handleLearningToggle, learningMode]);
@@ -250,6 +263,8 @@ function HUD({
         onSearchOpen={() => setSearchOpen(true)}
         onSettingsToggle={handleSettingsToggle}
         extraButtons={learningControls}
+        isMobile={isMobile}
+        climate={climate}
       />
 
       {/* ── LEFT / BOTTOM-SHEET: Selected Animal Panel ── */}
@@ -263,7 +278,7 @@ function HUD({
             config={selectedConfig}
             stats={selectedStats}
             behavior={selectedBehavior}
-            onForceAbility={onForceAbility}
+            onForceAbility={handleForceAbility}
             collapsed={panelCollapsed}
             onToggleCollapse={handlePanelToggle}
             onClose={handlePanelClose}
@@ -295,6 +310,7 @@ function HUD({
           selectedId={selectedAnimalId}
           cameraPosition={cameraPosition}
         />
+        <CompassWidget climate={climate} simMinutes={clock.simMinutes} />
         {notifications.length > 0 && (
           <Suspense fallback={null}>
             <NotificationFeed
