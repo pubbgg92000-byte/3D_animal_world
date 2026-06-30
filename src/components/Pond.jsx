@@ -866,6 +866,57 @@ function Reeds({ radius }) {
   );
 }
 
+function PondEdgePlants({ radius }) {
+  const plants = useMemo(() => {
+    const rng = seededRng(303);
+    return Array.from({ length: 34 }, (_, index) => {
+      const angle = (index / 34) * Math.PI * 2 + (rng() - 0.5) * 0.18;
+      const distance = radius * (1.16 + rng() * 0.24);
+      return {
+        key: index,
+        x: Math.cos(angle) * distance,
+        z: Math.sin(angle) * distance,
+        rot: angle + Math.PI / 2 + (rng() - 0.5) * 0.5,
+        scale: 0.55 + rng() * 0.55,
+        bloom: rng() > 0.56,
+        color: rng() > 0.5 ? '#2f8f44' : '#3fa052',
+      };
+    });
+  }, [radius]);
+
+  return (
+    <group name="pond-edge-plants">
+      {plants.map((plant) => (
+        <group
+          key={plant.key}
+          position={[plant.x, 0.05, plant.z]}
+          rotation={[0, plant.rot, 0]}
+          scale={plant.scale}
+        >
+          <mesh position={[-0.18, 0.2, 0]} rotation={[0.15, 0, -0.42]}>
+            <planeGeometry args={[0.22, 0.9, 1, 3]} />
+            <meshStandardMaterial color={plant.color} roughness={0.82} side={THREE.DoubleSide} />
+          </mesh>
+          <mesh position={[0.12, 0.24, 0.04]} rotation={[0.1, 0.2, 0.36]}>
+            <planeGeometry args={[0.24, 0.82, 1, 3]} />
+            <meshStandardMaterial color="#4caa4c" roughness={0.82} side={THREE.DoubleSide} />
+          </mesh>
+          <mesh position={[0, 0.44, 0]} rotation={[0.05, 0, 0]}>
+            <cylinderGeometry args={[0.018, 0.026, 0.78, 5]} />
+            <meshStandardMaterial color="#376f2f" roughness={0.86} />
+          </mesh>
+          {plant.bloom && (
+            <mesh position={[0, 0.86, 0]} scale={0.12}>
+              <sphereGeometry args={[1, 8, 6]} />
+              <meshStandardMaterial color={plant.key % 3 === 0 ? '#ff8cc8' : plant.key % 3 === 1 ? '#ffe16b' : '#b7a8ff'} roughness={0.58} />
+            </mesh>
+          )}
+        </group>
+      ))}
+    </group>
+  );
+}
+
 /* ================================================================
    Ripple rings — longer duration, random positions across pond
    ================================================================ */
@@ -943,6 +994,7 @@ export default function Pond() {
 
       <PoolLongGrass radius={r} />
       <Reeds radius={r} />
+      <PondEdgePlants radius={r} />
 
       {/* Overflow stream — rendered in world space so no group offset needed */}
     </group>

@@ -55,6 +55,7 @@ const Grass = lazy(() => import('./components/environment/Grass/Grass'));
 
 const LAST_SELECTED_ANIMAL_KEY = 'wild-trails:last-selected-animal';
 const MINIMAL_MARKERS_KEY = 'wild-trails:minimal-destination-markers';
+const FIRST_TOUR_SEEN_KEY = 'wild-trails:first-tour-seen';
 const WATER_APPROACH_POINTS = createWaterApproachPoints();
 
 function getLocalMinutesSinceMidnight() {
@@ -179,16 +180,7 @@ const EcosystemActionMenu = memo(function EcosystemActionMenu({ commandTarget, s
 });
 
 function getInitialSelectedAnimalId() {
-  if (typeof window === 'undefined') return ANIMAL_LIST[0]?.id || 'moose';
-  try {
-    const savedId = window.localStorage.getItem(LAST_SELECTED_ANIMAL_KEY);
-    if (savedId && ANIMAL_LIST.some((animal) => animal.id === savedId)) {
-      return savedId;
-    }
-  } catch {
-    // localStorage can be blocked in private/restricted browser contexts.
-  }
-  return ANIMAL_LIST[0]?.id || 'moose';
+  return null;
 }
 
 function getStoredSelectedAnimalId() {
@@ -198,6 +190,23 @@ function getStoredSelectedAnimalId() {
     return savedId && ANIMAL_LIST.some((animal) => animal.id === savedId) ? savedId : null;
   } catch {
     return null;
+  }
+}
+
+function shouldRunFirstTour() {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(FIRST_TOUR_SEEN_KEY) !== 'true';
+  } catch {
+    return false;
+  }
+}
+
+function rememberFirstTourSeen() {
+  try {
+    window.localStorage.setItem(FIRST_TOUR_SEEN_KEY, 'true');
+  } catch {
+    // Tour is optional; failure just means it may run again in restricted storage.
   }
 }
 
@@ -391,8 +400,9 @@ export default function App() {
 
   // Selection
   const [selectedId, setSelectedId] = useState(getInitialSelectedAnimalId);
-  const initialSelectedId = useRef(getInitialSelectedAnimalId());
-  const lastSelectedId = useRef(getStoredSelectedAnimalId() || getInitialSelectedAnimalId());
+  const [firstTourActive, setFirstTourActive] = useState(shouldRunFirstTour);
+  const initialSelectedId = useRef(ANIMAL_LIST[0]?.id || 'moose');
+  const lastSelectedId = useRef(getStoredSelectedAnimalId() || ANIMAL_LIST[0]?.id || 'moose');
   const initialAnimalIds = useMemo(
     () => getAnimalLoadOrder(initialSelectedId.current).slice(0, INITIAL_ANIMAL_COUNT),
     []
@@ -428,7 +438,7 @@ export default function App() {
   const [forcedBehaviors, setForcedBehaviors] = useState({});
 
   // Camera
-  const [cameraMode, setCameraMode] = useState('follow');
+  const [cameraMode, setCameraMode] = useState(() => shouldRunFirstTour() ? 'cinematic' : 'free');
   const lastAnimalCameraMode = useRef('follow');
   const [cameraPosition, setCameraPosition] = useState(null);
   const [cameraSettings, setCameraSettings] = useState({
@@ -438,6 +448,7 @@ export default function App() {
   });
   const animalPositions = useRef({});
   const [animalPositionsSnapshot, setAnimalPositionsSnapshot] = useState({});
+  const tourTarget = useMemo(() => new THREE.Vector3(0, 0, 5), []);
 
   // Simulation time ref — updated by HUD clock, read by Sky/Lighting per-frame
   const simMinutesRef = useRef(getLocalMinutesSinceMidnight());
@@ -472,7 +483,11 @@ export default function App() {
 
   // Once inside the world, stream one nearby animal during each quiet browser slot.
   useEffect(() => {
-    if (!worldReady || renderedAnimalIds.length >= ANIMAL_LIST.length) return undefined;
+    if (
+      !worldReady ||
+      renderedAnimalIds.length >= ANIMAL_LIST.length ||
+      renderedAnimalIds.length >= perfConfig.maxRenderedAnimals
+    ) return undefined;
     if (renderedAnimalIds.some((id) => !readyAnimalIds.has(id))) return undefined;
     const order = getAnimalLoadOrder(selectedId || lastSelectedId.current);
     const nextId = order.find((id) => !renderedAnimalIds.includes(id));
@@ -482,9 +497,10 @@ export default function App() {
     let idleId;
     const enqueue = () => {
       timer = setTimeout(() => {
-        setRenderedAnimalIds((current) => (
-          current.includes(nextId) ? current : [...current, nextId]
-        ));
+        setRenderedAnimalIds((current) => {
+          if (current.includes(nextId) || current.length >= perfConfig.maxRenderedAnimals) return current;
+          return [...current, nextId];
+        });
       }, ANIMAL_MODEL_STREAM_INTERVAL);
     };
 
@@ -696,8 +712,12 @@ export default function App() {
     setActiveMarker(null);
     setCommandTarget(null);
     setRenderedAnimalIds((current) => (
-      current.includes(id) ? current : [id, ...current]
+      current.includes(id)
+        ? current
+        : [id, ...current].slice(0, Math.max(1, perfConfig.maxRenderedAnimals))
     ));
+    rememberFirstTourSeen();
+    setFirstTourActive(false);
 
     setSelectedId((current) => {
       if (current === id) {
@@ -786,6 +806,16 @@ export default function App() {
     if (worldReady) markStartupPhase('hide-loading-screen');
   }, [worldReady]);
 
+  useEffect(() => {
+    if (!worldReady || !firstTourActive || selectedId) return undefined;
+    const timer = setTimeout(() => {
+      rememberFirstTourSeen();
+      setFirstTourActive(false);
+      setCameraMode('free');
+    }, 18000);
+    return () => clearTimeout(timer);
+  }, [firstTourActive, selectedId, worldReady]);
+
   const handleReactRender = useCallback((id, _phase, actualDuration) => {
     reportReactCommit(id, actualDuration);
   }, []);
@@ -811,7 +841,9 @@ export default function App() {
   const cameraTargetFallback = useMemo(() => new THREE.Vector3(), []);
   const cameraTarget = selectedId
     ? animalPositions.current[selectedId] || cameraTargetFallback
-    : null;
+    : firstTourActive
+      ? tourTarget
+      : null;
 
   // State label for camera
   const selectedBehavior = allBehaviors[selectedId] || 'Idle';
@@ -843,7 +875,7 @@ export default function App() {
           animalStats={allStats}
           animalBehaviors={allBehaviors}
           animalPositions={animalPositionsSnapshot}
-          cameraMode={selectedId ? cameraMode : 'free'}
+          cameraMode={selectedId || firstTourActive ? cameraMode : 'free'}
           cameraPosition={cameraPosition}
           cameraSettings={cameraSettings}
           onCameraModeChange={handleCameraModeChange}
@@ -950,7 +982,7 @@ export default function App() {
 
         <CameraController
           targetPosition={cameraTarget}
-          mode={selectedId ? cameraMode : 'free'}
+          mode={selectedId || firstTourActive ? cameraMode : 'free'}
           mooseState={mooseState}
           fov={cameraSettings.fov}
           smoothness={cameraSettings.smoothness}

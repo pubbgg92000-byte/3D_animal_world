@@ -12,7 +12,9 @@ export default function useSimulationClock(speedMultiplier = 1) {
   };
 
   const [simMinutes, setSimMinutes] = useState(getLocalMinutes);
+  const liveMinutes = useRef(getLocalMinutes());
   const lastTick = useRef(performance.now());
+  const lastUiUpdate = useRef(0);
   const paused = useRef(false);
 
   useEffect(() => {
@@ -20,7 +22,15 @@ export default function useSimulationClock(speedMultiplier = 1) {
     const tick = (now) => {
       if (!paused.current) {
         const elapsed = (now - lastTick.current) / 1000; // real seconds
-        setSimMinutes((prev) => (prev + (elapsed / 60) * speedMultiplier) % 1440);
+        liveMinutes.current = (liveMinutes.current + (elapsed / 60) * speedMultiplier) % 1440;
+
+        // Updating React state every animation frame forces the HUD/App tree to
+        // re-render constantly. Keep the simulated clock smooth internally, but
+        // refresh the visible UI once per second.
+        if (now - lastUiUpdate.current > 1000) {
+          lastUiUpdate.current = now;
+          setSimMinutes(liveMinutes.current);
+        }
       }
       lastTick.current = now;
       animId = requestAnimationFrame(tick);

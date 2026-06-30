@@ -1,5 +1,8 @@
 const MARK_PREFIX = 'wild-trails:';
 const marks = new Map();
+const ENABLE_DOM_DIAGNOSTICS =
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).has('debugPerf');
 
 function now() {
   return typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -17,7 +20,7 @@ export function markStartupPhase(name, detail = {}) {
     }
   }
 
-  if (typeof window !== 'undefined') {
+  if (ENABLE_DOM_DIAGNOSTICS) {
     window.__WILD_TRAILS_STARTUP__ = getStartupTimings();
     document.documentElement.dataset.wildTrailsStartup = JSON.stringify(window.__WILD_TRAILS_STARTUP__);
   }
@@ -39,7 +42,7 @@ export function getStartupTimings() {
 }
 
 export function reportRuntimeStats(renderer) {
-  if (!renderer || typeof window === 'undefined') return;
+  if (!renderer || !ENABLE_DOM_DIAGNOSTICS) return;
   const info = renderer.info;
   window.__WILD_TRAILS_RENDER_STATS__ = {
     calls: info.render.calls,
@@ -58,13 +61,13 @@ export function reportRuntimeStats(renderer) {
 }
 
 export function reportFpsSample(fps) {
-  if (typeof window === 'undefined') return;
+  if (!ENABLE_DOM_DIAGNOSTICS) return;
   window.__WILD_TRAILS_FPS__ = fps;
   document.documentElement.dataset.wildTrailsFps = String(fps);
 }
 
 export function reportReactCommit(id, actualDuration) {
-  if (typeof window === 'undefined') return;
+  if (!ENABLE_DOM_DIAGNOSTICS) return;
   const current = window.__WILD_TRAILS_REACT_PROFILER__ || {};
   const entry = current[id] || {
     commits: 0,

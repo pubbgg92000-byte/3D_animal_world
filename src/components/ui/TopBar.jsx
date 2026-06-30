@@ -50,6 +50,18 @@ export default function TopBar({
           <span>{climate.location}</span>
           <span className="wt-topbar__separator">·</span>
           <span>{climate.timeZoneLabel}</span>
+          {climate.coordinatesLabel && (
+            <>
+              <span className="wt-topbar__separator">·</span>
+              <span title="Weather coordinates">📌 {climate.coordinatesLabel}</span>
+            </>
+          )}
+          {climate.precipitation && (
+            <>
+              <span className="wt-topbar__separator">·</span>
+              <span title="Current precipitation">☔ {climate.precipitation}</span>
+            </>
+          )}
           {climate.permission === 'granted' && (
             <>
               <span className="wt-topbar__separator">·</span>

@@ -23,8 +23,8 @@ const WEATHER_CODES = {
 };
 
 const TIMEZONE_FALLBACKS = {
-  'Asia/Kolkata': { location: 'Kolkata, IN', latitude: 22.5726, longitude: 88.3639 },
-  'Asia/Calcutta': { location: 'Kolkata, IN', latitude: 22.5726, longitude: 88.3639 },
+  'Asia/Kolkata': { location: 'Hyderabad, Telangana, IN', latitude: 17.385, longitude: 78.4867 },
+  'Asia/Calcutta': { location: 'Hyderabad, Telangana, IN', latitude: 17.385, longitude: 78.4867 },
   'America/New_York': { location: 'New York, US', latitude: 40.7128, longitude: -74.006 },
   'America/Chicago': { location: 'Chicago, US', latitude: 41.8781, longitude: -87.6298 },
   'America/Denver': { location: 'Denver, US', latitude: 39.7392, longitude: -104.9903 },
@@ -55,8 +55,16 @@ function getTimezoneDetails() {
   };
 }
 
-function getSeason(date, latitude) {
+function getSeason(date, latitude, longitude) {
   const month = date.getMonth();
+  const isIndiaRegion =
+    latitude != null &&
+    longitude != null &&
+    latitude >= 6 &&
+    latitude <= 36 &&
+    longitude >= 68 &&
+    longitude <= 98;
+  if (isIndiaRegion && month >= 5 && month <= 8) return 'Rainy Season';
   const northern = latitude == null || latitude >= 0;
   const seasons = northern
     ? ['Winter', 'Winter', 'Spring', 'Spring', 'Spring', 'Summer', 'Summer', 'Summer', 'Autumn', 'Autumn', 'Autumn', 'Winter']
@@ -68,7 +76,7 @@ async function fetchClimate(latitude, longitude) {
   const weatherUrl = new URL('https://api.open-meteo.com/v1/forecast');
   weatherUrl.searchParams.set('latitude', latitude);
   weatherUrl.searchParams.set('longitude', longitude);
-  weatherUrl.searchParams.set('current', 'temperature_2m,relative_humidity_2m,weather_code,is_day');
+  weatherUrl.searchParams.set('current', 'temperature_2m,relative_humidity_2m,precipitation,rain,showers,weather_code,is_day');
   weatherUrl.searchParams.set('timezone', 'auto');
 
   const placeUrl = new URL('https://geocoding-api.open-meteo.com/v1/reverse');
@@ -88,7 +96,13 @@ async function fetchClimate(latitude, longitude) {
   const weather = await weatherResponse.json();
   const place = placeResponse.ok ? await placeResponse.json() : null;
   const current = weather.current || {};
-  const weatherState = WEATHER_CODES[current.weather_code] || WEATHER_CODES[0];
+  const measuredRain =
+    (Number.isFinite(current.rain) ? current.rain : 0) +
+    (Number.isFinite(current.showers) ? current.showers : 0) +
+    (Number.isFinite(current.precipitation) ? current.precipitation : 0);
+  const weatherState = measuredRain > 0
+    ? { icon: '🌧️', label: measuredRain >= 2 ? 'Rain' : 'Light Rain' }
+    : WEATHER_CODES[current.weather_code] || WEATHER_CODES[0];
   const placeResult = place?.results?.[0];
   const location = [placeResult?.name, placeResult?.admin1, placeResult?.country_code]
     .filter(Boolean)
@@ -104,7 +118,13 @@ async function fetchClimate(latitude, longitude) {
     humidity: Number.isFinite(current.relative_humidity_2m)
       ? `${Math.round(current.relative_humidity_2m)}%`
       : null,
+    precipitation: Number.isFinite(current.precipitation)
+      ? `${current.precipitation.toFixed(1)} mm`
+      : null,
+    rain: Number.isFinite(current.rain) ? current.rain : null,
+    showers: Number.isFinite(current.showers) ? current.showers : null,
     location: location || null,
+    coordinatesLabel: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
     latitude,
     longitude,
   };
@@ -165,7 +185,7 @@ export default function useLocalClimate() {
       if (cancelled) return;
       setSnapshot((current) => ({
         ...current,
-        season: getSeason(new Date(), current.latitude),
+          season: getSeason(new Date(), current.latitude, current.longitude),
       }));
     };
 
@@ -181,7 +201,7 @@ export default function useLocalClimate() {
         setSnapshot((current) => ({
           ...current,
           ...climate,
-          season: getSeason(new Date(), climate.latitude),
+          season: getSeason(new Date(), climate.latitude, climate.longitude),
           permission,
         }));
       } catch {
@@ -203,7 +223,7 @@ export default function useLocalClimate() {
             setSnapshot((current) => ({
               ...current,
               ...climate,
-              season: getSeason(new Date(), climate.latitude),
+              season: getSeason(new Date(), climate.latitude, climate.longitude),
               permission: 'granted',
             }));
           } catch {
