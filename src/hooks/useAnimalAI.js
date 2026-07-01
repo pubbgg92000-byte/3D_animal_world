@@ -3,12 +3,14 @@ import * as THREE from 'three';
 import { DIET } from '../config/animalConfig';
 import { TREE_POSITIONS } from '../components/Trees';
 import { GRASS_POSITIONS } from '../components/TallGrass';
-import { getHerdCenter } from '../utils/collisionRegistry';
+import { getHerdCenter, isStaticObstacleAt } from '../utils/collisionRegistry';
 import {
   WORLD_HALF,
   createPondRockHuntPoints,
   createWaterApproachPoints,
   getTerrainHeight,
+  isStreamBankPoint,
+  isWaterAt,
   randomDryPoint,
 } from '../utils/world';
 
@@ -36,6 +38,23 @@ function nearestPoint(points, position, maxDistance = Infinity) {
     }
   }
   return nearest;
+}
+
+function chooseWaterApproach(position, radius = 0.8) {
+  const safe = WATER_APPROACHES.filter((point) => (
+    !isWaterAt(point.x, point.z, 0.16)
+    && !isStaticObstacleAt(point.x, point.z, radius, 0.42)
+  ));
+  const points = safe.length ? safe : WATER_APPROACHES;
+  const nearest = nearestPoint(points, position);
+  const streamNearest = nearestPoint(points.filter((point) => isStreamBankPoint(point)), position);
+  if (!streamNearest) return nearest?.clone() || null;
+  if (!nearest) return streamNearest.clone();
+
+  const nearestDistance = position.distanceTo(nearest);
+  const streamDistance = position.distanceTo(streamNearest);
+  const useStream = streamDistance <= nearestDistance * 1.35 || Math.random() < 0.38;
+  return (useStream ? streamNearest : nearest).clone();
 }
 
 function pointNearTree(position) {
@@ -96,13 +115,13 @@ export default function useAnimalAI(diet = DIET.HERBIVORE, species = null, anima
 
   const pickNextBehavior = useCallback((position, urgentNeed) => {
     if (urgentNeed === 'hydration') {
-      begin(AI_STATE.DRINK, nearestPoint(WATER_APPROACHES, position)?.clone() || null, 10 + Math.random() * 6);
+      begin(AI_STATE.DRINK, chooseWaterApproach(position), 10 + Math.random() * 6);
       return;
     }
 
     if (urgentNeed === 'hunger') {
       if (diet === DIET.CARNIVORE) {
-        const fallback = nearestPoint(WATER_APPROACHES, position)?.clone() || chooseRoamingPoint(position);
+        const fallback = chooseWaterApproach(position) || chooseRoamingPoint(position);
         begin(AI_STATE.HUNT, huntingPoint(position, species, fallback), 14 + Math.random() * 8);
       } else {
         begin(AI_STATE.GRAZE, grazingPoint(position), 16 + Math.random() * 10);
@@ -122,12 +141,12 @@ export default function useAnimalAI(diet = DIET.HERBIVORE, species = null, anima
       begin(
         diet === DIET.CARNIVORE ? AI_STATE.HUNT : AI_STATE.GRAZE,
         diet === DIET.CARNIVORE
-          ? huntingPoint(position, species, nearestPoint(WATER_APPROACHES, position)?.clone() || chooseRoamingPoint(position))
+          ? huntingPoint(position, species, chooseWaterApproach(position) || chooseRoamingPoint(position))
           : grazingPoint(position),
         14 + Math.random() * 10
       );
     } else if (roll < 0.87) {
-      begin(AI_STATE.DRINK, nearestPoint(WATER_APPROACHES, position)?.clone() || null, 10 + Math.random() * 6);
+      begin(AI_STATE.DRINK, chooseWaterApproach(position), 10 + Math.random() * 6);
     } else {
       begin(AI_STATE.SLEEP, pointNearTree(position), 20 + Math.random() * 14);
     }
@@ -142,10 +161,10 @@ export default function useAnimalAI(diet = DIET.HERBIVORE, species = null, anima
     } else if (key === 'graze') {
       begin(AI_STATE.GRAZE, grazingPoint(position), 20);
     } else if (key.includes('hunt')) {
-      const fallback = nearestPoint(WATER_APPROACHES, position)?.clone() || chooseRoamingPoint(position);
+      const fallback = chooseWaterApproach(position) || chooseRoamingPoint(position);
       begin(AI_STATE.HUNT, huntingPoint(position, species, fallback), 20);
     } else if (key === 'drink') {
-      begin(AI_STATE.DRINK, nearestPoint(WATER_APPROACHES, position)?.clone() || null, 16);
+      begin(AI_STATE.DRINK, chooseWaterApproach(position), 16);
     } else if (key === 'sleep') {
       begin(AI_STATE.SLEEP, pointNearTree(position), 30);
     }

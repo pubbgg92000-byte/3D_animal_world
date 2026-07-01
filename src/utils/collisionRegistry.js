@@ -80,6 +80,17 @@ export function getObstacleHeight(x, z) {
   return maxHeight;
 }
 
+/** True when a destination would place an animal inside a static tree/rock. */
+export function isStaticObstacleAt(x, z, radius = 0.8, padding = 0.32) {
+  for (const ob of TREE_OBSTACLES) {
+    const clearance = (ob.r || 0) + radius + padding;
+    const dx = x - ob.x;
+    const dz = z - ob.z;
+    if (dx * dx + dz * dz < clearance * clearance) return true;
+  }
+  return false;
+}
+
 // ── Dynamic obstacles (animals) ──────────────────────────────────
 // Map of animalId → THREE.Vector3 (live position reference)
 const _animalPositions = new Map();

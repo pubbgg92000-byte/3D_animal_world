@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Menu, Search, Settings, X } from 'lucide-react';
+import { Info, Menu, Search, Settings, X } from 'lucide-react';
 
 /**
  * TopBar — Minimal, cinematic.
@@ -12,6 +12,7 @@ import { Menu, Search, Settings, X } from 'lucide-react';
 export default function TopBar({
   time = '09:00 AM',
   timeOfDay = 'Morning',
+  onGuideOpen,
   onSearchOpen,
   onSettingsToggle,
   extraButtons,
@@ -129,6 +130,15 @@ export default function TopBar({
       {/* ── Right: Extra + Search + Settings ── */}
       <div className="wt-topbar__right">
         {!isMobile && extraButtons}
+        <button
+          className="wt-topbar__icon-btn"
+          onClick={onGuideOpen}
+          title="Guide book"
+          aria-label="Open guide book"
+          data-tooltip="Controls, wildlife guide, and project info"
+        >
+          <Info aria-hidden="true" />
+        </button>
         <button
           className="wt-topbar__icon-btn"
           onClick={onSearchOpen}

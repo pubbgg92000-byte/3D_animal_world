@@ -271,9 +271,9 @@ export default function CameraController({
       minPolarAngle={config.minPolarAngle}
       maxPolarAngle={config.maxPolarAngle}
       mouseButtons={{
-        // Leave primary click to R3F meshes so animal inspection/selection works.
-        MIDDLE: THREE.MOUSE.ROTATE,
-        RIGHT: THREE.MOUSE.PAN,
+        // Keep camera gestures on left: drag rotates, modifier+drag pans.
+        // Right and wheel-click stay available for inspect/explore handlers.
+        LEFT: THREE.MOUSE.ROTATE,
       }}
       touches={{
         ONE: THREE.TOUCH.ROTATE,

@@ -270,6 +270,15 @@ canvas {
   flex-direction: column;
   align-items: center;
   gap: 2px;
+  width: min(760px, calc(100vw - 260px));
+  max-width: calc(100vw - 260px);
+  padding: 5px 12px 6px;
+  border: 1px solid rgba(234, 241, 225, 0.08);
+  border-radius: 999px;
+  background: rgba(5, 10, 8, 0.42);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .wt-topbar__time-weather {
@@ -278,7 +287,7 @@ canvas {
   gap: var(--wt-sp-sm);
   font-size: var(--wt-fs-meta);
   color: var(--wt-text-muted);
-  max-width: min(720px, calc(100vw - 260px));
+  max-width: 100%;
   white-space: nowrap;
 }
 
@@ -310,7 +319,7 @@ canvas {
   display: flex;
   align-items: center;
   gap: var(--wt-sp-xs);
-  max-width: min(760px, calc(100vw - 280px));
+  max-width: 100%;
   color: rgba(234, 241, 225, 0.58);
   font-size: var(--wt-fs-tiny);
   line-height: 1.1;
@@ -595,8 +604,26 @@ canvas {
   flex-shrink: 0;
 }
 
+.wt-animal-panel--collapsed .wt-animal-panel__header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.wt-animal-panel--collapsed .wt-animal-panel__identity {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wt-animal-panel--collapsed .wt-animal-panel__meta {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wt-animal-panel--collapsed .wt-animal-panel__status-badge,
 .wt-animal-panel--collapsed .wt-animal-panel__details-label {
-  display: inline-block !important;
+  display: none !important;
 }
 
 .wt-animal-panel__health-dot {
@@ -623,7 +650,7 @@ canvas {
   background: rgba(255, 255, 255, 0.05);
   color: var(--wt-text-muted);
   flex-shrink: 0;
-  transform: rotate(180deg);
+  transform: rotate(0deg);
   transition: background var(--wt-t-panel) var(--wt-ease-out-expo),
               color var(--wt-t-panel) var(--wt-ease-out-expo),
               transform var(--wt-t-panel) var(--wt-ease-out-expo);
@@ -638,7 +665,7 @@ canvas {
 .wt-animal-panel__chevron--open {
   background: rgba(255, 255, 255, 0.08);
   color: var(--wt-text);
-  transform: rotate(0deg);
+  transform: rotate(180deg);
 }
 
 /* Mini stats (collapsed state) */
@@ -1414,6 +1441,156 @@ canvas {
   outline: none;
 }
 
+.wt-guidebook {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(4, 8, 7, 0.45);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  pointer-events: auto;
+}
+
+.wt-guidebook__panel {
+  width: min(560px, calc(100vw - 28px));
+  max-height: min(680px, calc(100vh - 32px));
+  overflow: auto;
+  border: 1px solid rgba(216, 229, 199, 0.2);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 14% 0%, rgba(74, 222, 128, 0.13), transparent 30%),
+    rgba(9, 17, 13, 0.94);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.46);
+  color: rgba(241, 248, 235, 0.92);
+}
+
+.wt-guidebook__header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px 18px 12px;
+  background: rgba(9, 17, 13, 0.92);
+  border-bottom: 1px solid rgba(216, 229, 199, 0.12);
+}
+
+.wt-guidebook__eyebrow {
+  display: block;
+  color: rgba(166, 214, 142, 0.76);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.wt-guidebook__header h2 {
+  margin: 2px 0 0;
+  font-size: 1.45rem;
+  letter-spacing: 0;
+}
+
+.wt-guidebook__close {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(216, 229, 199, 0.15);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(241, 248, 235, 0.86);
+  cursor: pointer;
+}
+
+.wt-guidebook__close svg {
+  width: 18px;
+  height: 18px;
+}
+
+.wt-guidebook__intro {
+  display: flex;
+  gap: 12px;
+  margin: 16px 18px;
+  padding: 14px;
+  border: 1px solid rgba(74, 222, 128, 0.2);
+  border-radius: 12px;
+  background: rgba(74, 222, 128, 0.08);
+}
+
+.wt-guidebook__intro svg {
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  color: #7ee787;
+}
+
+.wt-guidebook__intro p,
+.wt-guidebook__item p {
+  margin: 0;
+  color: rgba(224, 234, 214, 0.72);
+  line-height: 1.45;
+}
+
+.wt-guidebook__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0 18px 18px;
+}
+
+.wt-guidebook__item {
+  display: flex;
+  gap: 12px;
+  min-height: 104px;
+  padding: 14px;
+  border: 1px solid rgba(216, 229, 199, 0.13);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.wt-guidebook__item-icon {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(216, 229, 199, 0.09);
+  color: #c9e9a5;
+}
+
+.wt-guidebook__item-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.wt-guidebook__item strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.94rem;
+}
+
+.wt-guidebook__item p {
+  font-size: 0.82rem;
+}
+
+.wt-guidebook__note {
+  margin: 0 18px 18px;
+  padding: 10px 12px;
+  border-top: 1px solid rgba(216, 229, 199, 0.12);
+  color: rgba(224, 234, 214, 0.64);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
 .wt-marker-tooltip,
 .wt-marker-feedback {
   pointer-events: none;
@@ -1610,6 +1787,27 @@ canvas {
     font-size: 0.66rem;
   }
 
+  .wt-animal-panel--collapsed .wt-animal-panel__header {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .wt-animal-panel--collapsed .wt-animal-panel__identity {
+    min-width: 0;
+  }
+
+  .wt-animal-panel--collapsed .wt-animal-panel__meta {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .wt-animal-panel--collapsed .wt-animal-panel__status-badge,
+  .wt-animal-panel--collapsed .wt-animal-panel__details-label {
+    display: none !important;
+  }
+
   .wt-animal-panel__close {
     width: 26px;
     height: 26px;
@@ -1783,11 +1981,14 @@ canvas {
    ======================================== */
 
 .wt-compass {
-  width: 152px;
+  width: 76px;
+  min-width: 76px;
+  height: 76px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 10px;
+  justify-content: center;
+  gap: 0;
+  padding: 7px;
   background: rgba(8, 14, 12, 0.78);
   border: 1px solid var(--wt-glass-border);
   border-radius: var(--wt-r-md);
@@ -1823,6 +2024,8 @@ canvas {
     linear-gradient(90deg, transparent 49%, rgba(234, 241, 225, 0.12) 50%, transparent 51%),
     linear-gradient(0deg, transparent 49%, rgba(234, 241, 225, 0.12) 50%, transparent 51%),
     rgba(9, 18, 13, 0.72);
+  transform: rotate(var(--camera-heading, 0rad));
+  transition: transform 140ms linear;
 }
 
 .wt-compass__icon {
@@ -1859,18 +2062,21 @@ canvas {
 }
 
 .wt-compass__meta {
+  position: absolute;
+  right: 7px;
+  bottom: 6px;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 10px;
-  line-height: 1.15;
-  color: rgba(234, 241, 225, 0.62);
+  pointer-events: none;
 }
 
 .wt-compass__meta span:first-child {
-  font-size: 11px;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: rgba(8, 14, 12, 0.72);
+  font-size: 8px;
   font-weight: 700;
+  line-height: 1;
   color: var(--wt-text);
 }
 
@@ -2173,6 +2379,12 @@ canvas {
     padding: 8px 12px;
   }
 
+  .wt-topbar__center {
+    width: min(54vw, 260px);
+    max-width: min(54vw, 260px);
+    padding: 5px 9px;
+  }
+
   /* Left panel — bottom sheet mode */
   .wt-hud__left {
     top: auto;
@@ -2226,7 +2438,7 @@ canvas {
   }
 
   .wt-compass__meta {
-    font-size: 9px;
+    display: none;
   }
 
   .wt-notifications {
@@ -2236,6 +2448,25 @@ canvas {
   /* Settings drawer */
   .wt-settings-drawer {
     width: 100vw;
+  }
+
+  .wt-guidebook {
+    align-items: flex-end;
+    padding: 10px;
+  }
+
+  .wt-guidebook__panel {
+    width: 100%;
+    max-height: min(78vh, 680px);
+    border-radius: 16px 16px 10px 10px;
+  }
+
+  .wt-guidebook__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wt-guidebook__item {
+    min-height: 0;
   }
 
   .wt-flash { font-size: 0.85rem; padding: 8px 18px; }

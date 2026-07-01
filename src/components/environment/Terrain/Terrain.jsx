@@ -7,7 +7,7 @@ const LONG_PRESS_MS = 400;
 const LONG_PRESS_MOVE_THRESHOLD = 10; // px
 const CLICK_DRAG_THRESHOLD = 6; // px
 
-export default function Terrain({ onClick, onDoubleClick, onLongPress, onContextMenu }) {
+export default function Terrain({ onClick, onDoubleClick, onMiddleClick, onLongPress, onContextMenu }) {
   const pressTimer = useRef(null);
   const pressStartPos = useRef(null);
   const pressEvent = useRef(null);
@@ -56,9 +56,9 @@ export default function Terrain({ onClick, onDoubleClick, onLongPress, onContext
   }, []);
 
   const handlePointerDown = useCallback((event) => {
-    if (event.nativeEvent?.button === 2) return;
     didLongPress.current = false;
     didDrag.current = false;
+    if (event.nativeEvent?.button !== 0) return;
     pressStartPos.current = {
       x: event.nativeEvent?.clientX ?? 0,
       y: event.nativeEvent?.clientY ?? 0,
@@ -88,9 +88,12 @@ export default function Terrain({ onClick, onDoubleClick, onLongPress, onContext
     }
   }, [clearPress]);
 
-  const handlePointerUp = useCallback(() => {
+  const handlePointerUp = useCallback((event) => {
     clearPress();
-  }, [clearPress]);
+    if (event.nativeEvent?.button !== 1 || didDrag.current) return;
+    event.stopPropagation();
+    onMiddleClick?.(event.point.clone(), getScreen(event.nativeEvent));
+  }, [clearPress, getScreen, onMiddleClick]);
 
   return (
     <mesh

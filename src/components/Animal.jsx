@@ -734,6 +734,15 @@ export default function Animal({
     [config.id, onSelect]
   );
 
+  const handleContextMenu = useCallback(
+    (e) => {
+      e.nativeEvent?.preventDefault?.();
+      e.stopPropagation();
+      onSelect?.(config.id);
+    },
+    [config.id, onSelect]
+  );
+
   // ---------- EVERY FRAME ----------
   useFrame((_, delta) => {
     if (!groupRef.current) return;
@@ -1013,6 +1022,7 @@ export default function Animal({
       ref={groupRef}
       dispose={null}
       onClick={handleClick}
+      onContextMenu={handleContextMenu}
       onPointerOver={() => { document.body.style.cursor = 'pointer'; }}
       onPointerOut={() => { document.body.style.cursor = 'default'; }}
     >

@@ -145,6 +145,12 @@ export function createWaterApproachPoints() {
   return points;
 }
 
+export function isStreamBankPoint(point, margin = 0.9) {
+  return point.z >= STREAM_START_Z - 0.25
+    && point.z <= STREAM_END_Z + 0.25
+    && Math.abs(point.x - streamCenterX(point.z)) < streamHalfWidth(point.z) + margin;
+}
+
 export function createPondRockHuntPoints() {
   return POND_HUNT_ROCKS.map(([fraction, radiusFactor]) => {
     const angle = fraction * Math.PI * 2;

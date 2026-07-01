@@ -17,8 +17,10 @@ import { playClick } from './hooks/useAudioFeedback';
 import {
   createWaterApproachPoints,
   getTerrainHeight,
+  isStreamBankPoint,
   isWaterAt,
 } from './utils/world';
+import { isStaticObstacleAt } from './utils/collisionRegistry';
 import { getSunIntensity, getSunVector } from './utils/solar';
 import { markStartupPhase, reportFpsSample, reportReactCommit, reportRuntimeStats } from './utils/startupProfiler';
 
@@ -113,10 +115,19 @@ const COMMANDS = {
   },
 };
 
-function getNearestWaterBank(point) {
-  let best = WATER_APPROACH_POINTS[0];
+function getNearestWaterBank(point, selectedConfig = null) {
+  const radius = selectedConfig?.collisionRadius || 0.8;
+  const safePoints = WATER_APPROACH_POINTS.filter((candidate) => (
+    !isWaterAt(candidate.x, candidate.z, 0.18)
+    && !isStaticObstacleAt(candidate.x, candidate.z, radius, 0.42)
+  ));
+  const points = safePoints.length ? safePoints : WATER_APPROACH_POINTS;
+  const streamPoints = points.filter((candidate) => isStreamBankPoint(candidate));
+  const pool = isStreamBankPoint(point, 2.4) && streamPoints.length ? streamPoints : points;
+
+  let best = pool[0];
   let bestDistance = Infinity;
-  for (const candidate of WATER_APPROACH_POINTS) {
+  for (const candidate of pool) {
     const distance = candidate.distanceToSquared(point);
     if (distance < bestDistance) {
       best = candidate;
@@ -336,11 +347,18 @@ function StartupSceneReporter({ loadStage, onFirstInteractiveFrame }) {
    ======================================== */
 function CameraPositionReporter({ onUpdate }) {
   const { camera } = useThree();
+  const direction = useRef(new THREE.Vector3());
 
   // Report camera position at tier-appropriate rate for minimap
   useEffect(() => {
     const interval = setInterval(() => {
-      onUpdate?.({ x: camera.position.x, y: camera.position.y, z: camera.position.z });
+      camera.getWorldDirection(direction.current);
+      onUpdate?.({
+        x: camera.position.x,
+        y: camera.position.y,
+        z: camera.position.z,
+        heading: Math.atan2(direction.current.x, direction.current.z),
+      });
     }, perfConfig.minimapUpdateRate);
     return () => clearInterval(interval);
   }, [camera, onUpdate]);
@@ -656,8 +674,9 @@ export default function App() {
   const issueCommand = useCallback(
     (point, command, { run = false } = {}) => {
       if (!selectedId) return;
-      const destination = isWaterAt(point.x, point.z, 0.9)
-        ? getNearestWaterBank(point)
+      const selectedAnimalConfig = ANIMAL_LIST.find((animal) => animal.id === selectedId);
+      const destination = command?.type === 'drink' || command?.type === 'fish' || isWaterAt(point.x, point.z, 0.9)
+        ? getNearestWaterBank(point, selectedAnimalConfig)
         : point.clone();
 
       playClick();
@@ -674,7 +693,8 @@ export default function App() {
     [selectedId]
   );
 
-  // Single click/tap → walk directly (no popup)
+  // Single click/tap -> walk directly. Left-drag is reserved for camera pan,
+  // so Terrain filters drag distance before this handler can fire.
   const handleGroundClick = useCallback(
     (point) => {
       if (!selectedId) return;
@@ -684,16 +704,16 @@ export default function App() {
     [selectedId, issueCommand]
   );
 
-  // Double-click → run
+  // Double-click or wheel-click -> open the guided action menu.
   const handleGroundDoubleClick = useCallback(
-    (point) => {
+    (point, screen) => {
       if (!selectedId) return;
-      issueCommand(point, COMMANDS.walk, { run: true });
+      setCommandTarget({ point, screen });
     },
-    [issueCommand, selectedId]
+    [selectedId]
   );
 
-  // Long-press (mobile) or right-click (desktop) → context menu
+  // Long-press (mobile), wheel-click, or right-click (desktop) -> action menu.
   const handleGroundLongPress = useCallback(
     (point, screen) => {
       if (!selectedId) return;
@@ -899,7 +919,9 @@ export default function App() {
         <Terrain
           onClick={handleGroundClick}
           onDoubleClick={handleGroundDoubleClick}
+          onMiddleClick={handleGroundLongPress}
           onLongPress={handleGroundLongPress}
+          onContextMenu={handleGroundLongPress}
         />
         {loadStage >= 1 && (
           <Suspense fallback={null}>

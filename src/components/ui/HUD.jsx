@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, Suspense, lazy, useMemo, memo } from 'react';
-import { BookOpen } from 'lucide-react';
+import { BookOpen, Info, MousePointer2, Move, Route, X, ZoomIn } from 'lucide-react';
 import TopBar from './TopBar';
 import AnimalPanel from './AnimalPanel';
 import AnimalCarousel from './AnimalCarousel';
@@ -61,6 +61,7 @@ function HUD({
   const [searchOpen, setSearchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [encyclopediaOpen, setEncyclopediaOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
   const [learningMode, setLearningMode] = useState(() => {
     try { return localStorage.getItem('wild-trails:learning-mode') === 'true'; }
     catch { return false; }
@@ -136,6 +137,7 @@ function HUD({
       if (e.key === 'Escape') {
         setSettingsOpen(false);
         setEncyclopediaOpen(false);
+        setGuideOpen(false);
       }
     };
     window.addEventListener('keydown', handler);
@@ -260,6 +262,7 @@ function HUD({
       <TopBar
         time={clock.formatted}
         timeOfDay={clock.timeOfDay}
+        onGuideOpen={() => setGuideOpen(true)}
         onSearchOpen={() => setSearchOpen(true)}
         onSettingsToggle={handleSettingsToggle}
         extraButtons={learningControls}
@@ -310,7 +313,7 @@ function HUD({
           selectedId={selectedAnimalId}
           cameraPosition={cameraPosition}
         />
-        <CompassWidget climate={climate} simMinutes={clock.simMinutes} />
+        <CompassWidget climate={climate} simMinutes={clock.simMinutes} cameraPosition={cameraPosition} />
         {notifications.length > 0 && (
           <Suspense fallback={null}>
             <NotificationFeed
@@ -362,6 +365,10 @@ function HUD({
         </Suspense>
       )}
 
+      {guideOpen && (
+        <GuideBookOverlay onClose={() => setGuideOpen(false)} />
+      )}
+
       {/* ── Discovery Popup ── */}
       <DiscoveryPopup selectedAnimalId={selectedAnimalId} />
 
@@ -382,6 +389,55 @@ function HUD({
 }
 
 export default memo(HUD);
+
+function GuideBookOverlay({ onClose }) {
+  const controlItems = [
+    { icon: Move, title: 'Pan', text: 'Hold Shift, Ctrl, or Cmd and left-drag to move the camera across the forest.' },
+    { icon: ZoomIn, title: 'Zoom', text: 'Use the mouse wheel or two-finger pinch to zoom in and out.' },
+    { icon: Route, title: 'Explore', text: 'Double-click the ground or press the mouse wheel to open wildlife actions.' },
+    { icon: MousePointer2, title: 'Rotate / Inspect', text: 'Left-drag rotates. Right-click the ground for options, or click animals to inspect them.' },
+  ];
+
+  return (
+    <div className="wt-guidebook" role="dialog" aria-modal="true" aria-labelledby="wt-guidebook-title" onClick={onClose}>
+      <div className="wt-guidebook__panel" onClick={(event) => event.stopPropagation()}>
+        <div className="wt-guidebook__header">
+          <div>
+            <span className="wt-guidebook__eyebrow">Wild Trails</span>
+            <h2 id="wt-guidebook-title">Guide Book</h2>
+          </div>
+          <button className="wt-guidebook__close" type="button" onClick={onClose} aria-label="Close guide book">
+            <X aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className="wt-guidebook__intro">
+          <Info aria-hidden="true" />
+          <p>
+            A calm 3D wildlife meadow where you can follow animals, explore behavior,
+            learn species facts, and test weather-aware forest ambience.
+          </p>
+        </div>
+
+        <div className="wt-guidebook__grid">
+          {controlItems.map(({ icon: Icon, title, text }) => (
+            <div className="wt-guidebook__item" key={title}>
+              <span className="wt-guidebook__item-icon"><Icon aria-hidden="true" /></span>
+              <div>
+                <strong>{title}</strong>
+                <p>{text}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="wt-guidebook__note">
+          Mobile: drag to orbit, pinch to zoom, long-press the ground for action options.
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /* ── Selection Flash — brief popup on animal selection ── */
 function SelectionFlash({ selectedId, animalConfigs }) {
